@@ -26,6 +26,8 @@ db.exec(`
     created_at TEXT
   );
 `);
+// migration: add support_status column if missing
+try { db.exec("ALTER TABLE names ADD COLUMN support_status TEXT DEFAULT ''"); } catch {}
 
 const adminExists = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
 if (!adminExists) {
@@ -51,41 +53,41 @@ if (!usersExist) {
 
   const demoNames = {
     u_demo1: [
-      { name:'אברהם אבוטבול', phone:'0521111111', daysAgo:0 },
-      { name:'בתיה בן-דוד',   phone:'0532222222', daysAgo:0 },
-      { name:'גדעון גולן',     phone:'0543333333', daysAgo:1 },
-      { name:'דינה דיאמנט',   phone:'0554444444', daysAgo:1 },
-      { name:'הדר הרצוג',     phone:'0565555555', daysAgo:2 },
-      { name:'ויקטוריה ויסמן', phone:'', daysAgo:null },
-      { name:'זיוה זכריה',     phone:'', daysAgo:null },
-      { name:'חיים חדד',       phone:'', daysAgo:null },
-      { name:'טל טייב',        phone:'', daysAgo:null },
-      { name:'יעל יצחקי',      phone:'', daysAgo:null },
+      { name:'אברהם אבוטבול', phone:'0521111111', daysAgo:0, support:'supporter' },
+      { name:'בתיה בן-דוד',   phone:'0532222222', daysAgo:0, support:'supporter' },
+      { name:'גדעון גולן',     phone:'0543333333', daysAgo:1, support:'not_supporter' },
+      { name:'דינה דיאמנט',   phone:'0554444444', daysAgo:1, support:'supporter' },
+      { name:'הדר הרצוג',     phone:'0565555555', daysAgo:2, support:'' },
+      { name:'ויקטוריה ויסמן', phone:'', daysAgo:null, support:'' },
+      { name:'זיוה זכריה',     phone:'', daysAgo:null, support:'' },
+      { name:'חיים חדד',       phone:'', daysAgo:null, support:'' },
+      { name:'טל טייב',        phone:'', daysAgo:null, support:'' },
+      { name:'יעל יצחקי',      phone:'', daysAgo:null, support:'' },
     ],
     u_demo2: [
-      { name:'כרמית כהן',      phone:'0571234567', daysAgo:0 },
-      { name:'לימור לוי',      phone:'0582345678', daysAgo:0 },
-      { name:'מיכל מזרחי',     phone:'0593456789', daysAgo:0 },
-      { name:'נועה נחמני',     phone:'0504567890', daysAgo:1 },
-      { name:'סיגל סמואל',     phone:'', daysAgo:null },
-      { name:'עינב עמרני',     phone:'', daysAgo:null },
-      { name:'פנינה פרץ',      phone:'', daysAgo:null },
+      { name:'כרמית כהן',      phone:'0571234567', daysAgo:0, support:'supporter' },
+      { name:'לימור לוי',      phone:'0582345678', daysAgo:0, support:'not_supporter' },
+      { name:'מיכל מזרחי',     phone:'0593456789', daysAgo:0, support:'supporter' },
+      { name:'נועה נחמני',     phone:'0504567890', daysAgo:1, support:'supporter' },
+      { name:'סיגל סמואל',     phone:'', daysAgo:null, support:'' },
+      { name:'עינב עמרני',     phone:'', daysAgo:null, support:'' },
+      { name:'פנינה פרץ',      phone:'', daysAgo:null, support:'' },
     ],
     u_demo3: [
-      { name:'צבי צדוק',        phone:'', daysAgo:null },
-      { name:'קרן קפלן',        phone:'', daysAgo:null },
-      { name:'ראובן רוזנברג',   phone:'', daysAgo:null },
-      { name:'שמואל שפירא',     phone:'', daysAgo:null },
-      { name:'תמר תורג\'מן',    phone:'', daysAgo:null },
+      { name:'צבי צדוק',       phone:'', daysAgo:null, support:'' },
+      { name:'קרן קפלן',       phone:'', daysAgo:null, support:'' },
+      { name:'ראובן רוזנברג',  phone:'', daysAgo:null, support:'' },
+      { name:'שמואל שפירא',    phone:'', daysAgo:null, support:'' },
+      { name:'תמר תורג\'מן',   phone:'', daysAgo:null, support:'' },
     ],
   };
 
-  const insertName = db.prepare('INSERT INTO names VALUES (?,?,?,?,?,?)');
+  const insertName = db.prepare('INSERT INTO names (id,user_id,name,phone,phone_added_at,support_status,created_at) VALUES (?,?,?,?,?,?,?)');
   let idx = 0;
   Object.entries(demoNames).forEach(([userId, names]) => {
     names.forEach(n => {
       const addedAt = n.phone && n.daysAgo !== null ? daysAgo(n.daysAgo) : null;
-      insertName.run(`n_demo${idx++}`, userId, n.name, n.phone||'', addedAt, ts());
+      insertName.run(`n_demo${idx++}`, userId, n.name, n.phone||'', addedAt, n.support||'', ts());
     });
   });
 }
@@ -168,7 +170,7 @@ app.get('/api/names', auth, (req, res) => {
   const userId = req.query.userId || req.session.userId;
   if (req.session.role !== 'admin' && userId !== req.session.userId) return res.status(403).json({ error: 'Forbidden' });
   const rows = db.prepare('SELECT * FROM names WHERE user_id=? ORDER BY created_at ASC').all(userId);
-  res.json(rows.map(n => ({ id: n.id, userId: n.user_id, name: n.name, phone: n.phone, phoneAddedAt: n.phone_added_at, createdAt: n.created_at })));
+  res.json(rows.map(n => ({ id: n.id, userId: n.user_id, name: n.name, phone: n.phone, phoneAddedAt: n.phone_added_at, supportStatus: n.support_status||'', createdAt: n.created_at })));
 });
 
 app.post('/api/names', admin, (req, res) => {
@@ -192,13 +194,18 @@ app.post('/api/names', admin, (req, res) => {
 });
 
 app.put('/api/names/:id', auth, (req, res) => {
-  const { phone } = req.body;
+  const { phone, supportStatus } = req.body;
   const n = db.prepare('SELECT * FROM names WHERE id=?').get(req.params.id);
   if (!n) return res.status(404).json({ error: 'לא נמצא' });
   if (req.session.role !== 'admin' && n.user_id !== req.session.userId) return res.status(403).json({ error: 'Forbidden' });
-  db.prepare('UPDATE names SET phone=?, phone_added_at=? WHERE id=?').run(
-    phone || '', phone ? new Date().toISOString() : null, req.params.id
-  );
+  if (phone !== undefined) {
+    db.prepare('UPDATE names SET phone=?, phone_added_at=? WHERE id=?').run(
+      phone || '', phone ? new Date().toISOString() : null, req.params.id
+    );
+  }
+  if (supportStatus !== undefined) {
+    db.prepare('UPDATE names SET support_status=? WHERE id=?').run(supportStatus, req.params.id);
+  }
   res.json({ ok: true });
 });
 
@@ -207,14 +214,17 @@ app.get('/api/stats', admin, (req, res) => {
   const users = db.prepare("SELECT id,username,display_name,phone FROM users WHERE role!='admin'").all();
   const today = new Date().toDateString();
   const stats = users.map(u => {
-    const all = db.prepare('SELECT phone,phone_added_at FROM names WHERE user_id=?').all(u.id);
-    const collected = all.filter(n => n.phone).length;
-    const todayC = all.filter(n => n.phone && new Date(n.phone_added_at).toDateString() === today).length;
+    const all = db.prepare('SELECT phone,phone_added_at,support_status FROM names WHERE user_id=?').all(u.id);
+    const collected   = all.filter(n => n.phone).length;
+    const todayC      = all.filter(n => n.phone && new Date(n.phone_added_at).toDateString() === today).length;
+    const supporters  = all.filter(n => n.support_status === 'supporter').length;
+    const notSupport  = all.filter(n => n.support_status === 'not_supporter').length;
     return {
       userId: u.id, displayName: u.display_name, username: u.username, phone: u.phone,
       total: all.length, collected, today: todayC,
       remaining: all.length - collected,
-      pct: all.length ? Math.round(collected / all.length * 100) : 0
+      pct: all.length ? Math.round(collected / all.length * 100) : 0,
+      supporters, notSupport
     };
   });
   res.json(stats);
@@ -223,16 +233,16 @@ app.get('/api/stats', admin, (req, res) => {
 // ── EXPORT (admin) ──
 app.get('/api/export/all', admin, (req, res) => {
   const rows = db.prepare(`
-    SELECT n.name, n.phone, u.display_name, n.phone_added_at
+    SELECT n.name, n.phone, n.support_status, u.display_name, n.phone_added_at
     FROM names n JOIN users u ON n.user_id=u.id
     WHERE n.phone!='' ORDER BY u.display_name, n.name
   `).all();
-  res.json(rows.map(r => ({ name: r.name, phone: r.phone, user: r.display_name, date: r.phone_added_at })));
+  res.json(rows.map(r => ({ name: r.name, phone: r.phone, support: r.support_status, user: r.display_name, date: r.phone_added_at })));
 });
 
 app.get('/api/export/user/:id', admin, (req, res) => {
-  const rows = db.prepare("SELECT name,phone,phone_added_at FROM names WHERE user_id=? AND phone!=''").all(req.params.id);
-  res.json(rows.map(r => ({ name: r.name, phone: r.phone, date: r.phone_added_at })));
+  const rows = db.prepare("SELECT name,phone,support_status,phone_added_at FROM names WHERE user_id=? AND phone!=''").all(req.params.id);
+  res.json(rows.map(r => ({ name: r.name, phone: r.phone, support: r.support_status, date: r.phone_added_at })));
 });
 
 const PORT = process.env.PORT || 3000;

@@ -153,6 +153,13 @@ tr:last-child td { border-bottom: none; }
 .upload-area:active { border-color: #3b82f6; }
 .upload-area input { display: none; }
 
+/* ===== SUPPORT BUTTONS ===== */
+.support-btns { display: flex; gap: 8px; margin-top: 8px; }
+.support-btn { flex: 1; padding: 9px 8px; border-radius: 9px; border: 2px solid #e5e7eb; background: #f8fafc; color: #64748b; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; min-height: 40px; transition: all .15s; }
+.support-btn:active { opacity: .75; }
+.support-btn.active-green { background: #dcfce7; border-color: #22c55e; color: #16a34a; }
+.support-btn.active-red   { background: #fee2e2; border-color: #ef4444; color: #dc2626; }
+
 /* ===== MISC ===== */
 .inline-flex { display: flex; align-items: center; gap: 8px; }
 .row-num { color: #94a3b8; font-size: 12px; }
@@ -420,7 +427,7 @@ async function renderAdmin() {
         </div>
         ${renderStatsCards(stats)}
         <div class="table-wrap desktop-only" style="display:block;">
-          <table><thead><tr><th>#</th><th>משתמש</th><th>שמות</th><th>אספו</th><th>היום</th><th>נשאר</th><th>התקדמות</th><th>דירוג</th><th>פעולות</th></tr></thead>
+          <table><thead><tr><th>#</th><th>משתמש</th><th>שמות</th><th>אספו</th><th>היום</th><th>נשאר</th><th>✅ תומכים / ❌ לא</th><th>התקדמות</th><th>דירוג</th><th>פעולות</th></tr></thead>
           <tbody>${renderStatsRows(stats)}</tbody></table>
         </div>
       ` : `
@@ -459,6 +466,9 @@ function renderStatsCards(stats) {
         <div class="user-card-stat"><div class="cs-val">${u.total}</div><div class="cs-lbl">שמות</div></div>
         <div class="user-card-stat"><div class="cs-val" style="color:#22c55e;">${u.collected}</div><div class="cs-lbl">אספו</div></div>
         <div class="user-card-stat"><div class="cs-val" style="color:#f59e0b;">${u.remaining}</div><div class="cs-lbl">נשאר</div></div>
+        <div class="user-card-stat"><div class="cs-val" style="color:#22c55e;">✅ ${u.supporters}</div><div class="cs-lbl">תומכים</div></div>
+        <div class="user-card-stat"><div class="cs-val" style="color:#ef4444;">❌ ${u.notSupport}</div><div class="cs-lbl">לא תומכים</div></div>
+        <div class="user-card-stat"><div class="cs-val" style="color:#94a3b8;">${u.collected-(u.supporters+u.notSupport)}</div><div class="cs-lbl">לא סומן</div></div>
       </div>
       <div class="user-card-progress">
         <div class="user-card-progress-row">
@@ -507,6 +517,7 @@ function renderStatsRows(stats) {
       <td class="row-num">${i+1}</td>
       <td><strong>${u.displayName}</strong><br><span style="color:#94a3b8;font-size:12px;">${u.username}</span></td>
       <td>${u.total}</td><td><strong>${u.collected}</strong></td><td>${u.today}</td><td>${u.remaining}</td>
+      <td><span style="color:#16a34a;font-weight:700;">✅ ${u.supporters}</span> &nbsp;<span style="color:#ef4444;font-weight:700;">❌ ${u.notSupport}</span></td>
       <td><div class="inline-flex"><div class="progress-bar"><div class="progress-fill" style="width:${u.pct}%"></div></div><span style="font-size:12px;color:#64748b;">${u.pct}%</span></div></td>
       <td>${badge}</td>
       <td><div class="inline-flex" style="flex-wrap:wrap;gap:4px;">
@@ -712,6 +723,7 @@ function renderProfileView(userId) {
         : profileTab==='pending'
           ? filtered.map(n => {
               const orig = profileNames.indexOf(n)+1;
+              const ss = n.supportStatus;
               return `<div class="name-row">
                 <div class="name-row-top">
                   <span class="name-row-label">${n.name}</span>
@@ -722,11 +734,21 @@ function renderProfileView(userId) {
                     onkeydown="if(event.key==='Enter')savePhone('${userId}','${n.id}')">
                   <button class="save-btn" onclick="savePhone('${userId}','${n.id}')">שמור</button>
                 </div>
+                <div class="support-btns">
+                  <button class="support-btn ${ss==='supporter'?'active-green':''}" onclick="setSupport('${userId}','${n.id}','supporter')">✅ תומך</button>
+                  <button class="support-btn ${ss==='not_supporter'?'active-red':''}" onclick="setSupport('${userId}','${n.id}','not_supporter')">❌ לא תומך</button>
+                </div>
               </div>`;
             }).join('')
           : filtered.map(n => {
               const orig = profileNames.indexOf(n)+1;
               const d = n.phoneAddedAt ? new Date(n.phoneAddedAt).toLocaleDateString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+              const ss = n.supportStatus;
+              const supportBadge = ss==='supporter'
+                ? '<span class="badge badge-green">✅ תומך</span>'
+                : ss==='not_supporter'
+                ? '<span class="badge badge-red">❌ לא תומך</span>'
+                : '<span class="badge badge-gray">לא סומן</span>';
               return `<div class="archive-row">
                 <div class="archive-row-header">
                   <span class="archive-name">${n.name}</span>
@@ -734,7 +756,14 @@ function renderProfileView(userId) {
                 </div>
                 <div class="archive-row-footer">
                   <span class="archive-date">${d}</span>
-                  <button class="btn btn-sm btn-gray" onclick="clearPhone('${userId}','${n.id}')">↩ החזר</button>
+                  <div style="display:flex;gap:6px;align-items:center;">
+                    ${supportBadge}
+                    <button class="btn btn-sm btn-gray" onclick="clearPhone('${userId}','${n.id}')">↩</button>
+                  </div>
+                </div>
+                <div class="support-btns" style="margin-top:8px;">
+                  <button class="support-btn ${ss==='supporter'?'active-green':''}" onclick="setSupport('${userId}','${n.id}','supporter')">✅ תומך</button>
+                  <button class="support-btn ${ss==='not_supporter'?'active-red':''}" onclick="setSupport('${userId}','${n.id}','not_supporter')">❌ לא תומך</button>
                 </div>
               </div>`;
             }).join('')
@@ -761,14 +790,24 @@ async function clearPhone(userId, nameId) {
     renderProfileView(userId);
   } catch(e) { alert(e.message); }
 }
+async function setSupport(userId, nameId, status) {
+  const n = profileNames.find(x=>x.id===nameId);
+  const newStatus = n && n.supportStatus === status ? '' : status;
+  try {
+    await PUT(`/api/names/${nameId}`, {supportStatus: newStatus});
+    profileNames = await GET(`/api/names?userId=${userId}`);
+    renderProfileView(userId);
+  } catch(e) { alert(e.message); }
+}
 
 // ===== EXCEL EXPORT =====
 async function exportAllExcel() {
   try {
     const rows = await GET('/api/export/all');
     if (!rows.length) { alert('אין טלפונים שנאספו עדיין'); return; }
-    const data = [['שם','טלפון','משתמש','תאריך הזנה'],
-      ...rows.map(r=>[r.name, r.phone, r.user, r.date?new Date(r.date).toLocaleDateString('he-IL'):''])];
+    const sup = s => s==='supporter'?'✅ תומך':s==='not_supporter'?'❌ לא תומך':'—';
+    const data = [['שם','טלפון','תמיכה','משתמש','תאריך הזנה'],
+      ...rows.map(r=>[r.name, r.phone, sup(r.support), r.user, r.date?new Date(r.date).toLocaleDateString('he-IL'):''])];
     dlExcel(data, 'כל_הטלפונים');
   } catch(e) { alert(e.message); }
 }
@@ -776,8 +815,9 @@ async function exportUserExcel(userId, displayName) {
   try {
     const rows = await GET(`/api/export/user/${userId}`);
     if (!rows.length) { alert('אין טלפונים שנאספו עבור משתמש זה'); return; }
-    const data = [['שם','טלפון','תאריך הזנה'],
-      ...rows.map(r=>[r.name, r.phone, r.date?new Date(r.date).toLocaleDateString('he-IL'):''])];
+    const sup = s => s==='supporter'?'✅ תומך':s==='not_supporter'?'❌ לא תומך':'—';
+    const data = [['שם','טלפון','תמיכה','תאריך הזנה'],
+      ...rows.map(r=>[r.name, r.phone, sup(r.support), r.date?new Date(r.date).toLocaleDateString('he-IL'):''])];
     dlExcel(data, `טלפונים_${displayName||userId}`);
   } catch(e) { alert(e.message); }
 }
