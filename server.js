@@ -34,6 +34,62 @@ if (!adminExists) {
   );
 }
 
+// Seed demo data if no regular users exist
+const usersExist = db.prepare("SELECT id FROM users WHERE role='user' LIMIT 1").get();
+if (!usersExist) {
+  const now = new Date();
+  const ts = () => new Date().toISOString();
+  const daysAgo = d => new Date(now - d*86400000).toISOString();
+
+  const demoUsers = [
+    { id:'u_demo1', username:'moshe', password:'1234', displayName:'משה כהן', phone:'0501234567' },
+    { id:'u_demo2', username:'sarah', password:'1234', displayName:'שרה לוי',  phone:'0527654321' },
+    { id:'u_demo3', username:'yossi', password:'1234', displayName:'יוסי ברקוביץ', phone:'0541112233' },
+  ];
+  const insertUser = db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?,?)');
+  demoUsers.forEach(u => insertUser.run(u.id, u.username, u.password, 'user', u.displayName, u.phone, ts()));
+
+  const demoNames = {
+    u_demo1: [
+      { name:'אברהם אבוטבול', phone:'0521111111', daysAgo:0 },
+      { name:'בתיה בן-דוד',   phone:'0532222222', daysAgo:0 },
+      { name:'גדעון גולן',     phone:'0543333333', daysAgo:1 },
+      { name:'דינה דיאמנט',   phone:'0554444444', daysAgo:1 },
+      { name:'הדר הרצוג',     phone:'0565555555', daysAgo:2 },
+      { name:'ויקטוריה ויסמן', phone:'', daysAgo:null },
+      { name:'זיוה זכריה',     phone:'', daysAgo:null },
+      { name:'חיים חדד',       phone:'', daysAgo:null },
+      { name:'טל טייב',        phone:'', daysAgo:null },
+      { name:'יעל יצחקי',      phone:'', daysAgo:null },
+    ],
+    u_demo2: [
+      { name:'כרמית כהן',      phone:'0571234567', daysAgo:0 },
+      { name:'לימור לוי',      phone:'0582345678', daysAgo:0 },
+      { name:'מיכל מזרחי',     phone:'0593456789', daysAgo:0 },
+      { name:'נועה נחמני',     phone:'0504567890', daysAgo:1 },
+      { name:'סיגל סמואל',     phone:'', daysAgo:null },
+      { name:'עינב עמרני',     phone:'', daysAgo:null },
+      { name:'פנינה פרץ',      phone:'', daysAgo:null },
+    ],
+    u_demo3: [
+      { name:'צבי צדוק',        phone:'', daysAgo:null },
+      { name:'קרן קפלן',        phone:'', daysAgo:null },
+      { name:'ראובן רוזנברג',   phone:'', daysAgo:null },
+      { name:'שמואל שפירא',     phone:'', daysAgo:null },
+      { name:'תמר תורג\'מן',    phone:'', daysAgo:null },
+    ],
+  };
+
+  const insertName = db.prepare('INSERT INTO names VALUES (?,?,?,?,?,?)');
+  let idx = 0;
+  Object.entries(demoNames).forEach(([userId, names]) => {
+    names.forEach(n => {
+      const addedAt = n.phone && n.daysAgo !== null ? daysAgo(n.daysAgo) : null;
+      insertName.run(`n_demo${idx++}`, userId, n.name, n.phone||'', addedAt, ts());
+    });
+  });
+}
+
 app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({
