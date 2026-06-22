@@ -634,6 +634,7 @@ function openUserDetail(userId) {
 
 // ===================== USER PROFILE =====================
 let phoneFilter = '';
+let profileTab = 'pending';
 
 function renderUserProfile(userId) {
   const users = getUsers();
@@ -641,12 +642,13 @@ function renderUserProfile(userId) {
   if (!user) return;
   const names = getNames().filter(n => n.userId === userId);
   const today = new Date().toDateString();
-  const collected = names.filter(n => n.phone).length;
-  const todayC = names.filter(n => n.phone && new Date(n.phoneAddedAt).toDateString() === today).length;
-  const remaining = names.length - collected;
-  const pct = names.length ? Math.round(collected / names.length * 100) : 0;
+  const pending = names.filter(n => !n.phone);
+  const archived = names.filter(n => n.phone);
+  const todayC = archived.filter(n => new Date(n.phoneAddedAt).toDateString() === today).length;
+  const pct = names.length ? Math.round(archived.length / names.length * 100) : 0;
 
-  const filtered = names.filter(n => !phoneFilter || n.name.includes(phoneFilter));
+  const activeList = profileTab === 'pending' ? pending : archived;
+  const filtered = activeList.filter(n => !phoneFilter || n.name.includes(phoneFilter));
 
   document.getElementById('mainContent').innerHTML = `
     <div style="margin-bottom:20px;">
@@ -665,9 +667,20 @@ function renderUserProfile(userId) {
         <div style="margin-top:8px;"><div class="progress-bar" style="width:100%;"><div class="progress-fill" style="width:${pct}%"></div></div></div>
       </div>
       <div class="summary-card orange">
-        <div class="num">${remaining}</div>
+        <div class="num">${pending.length}</div>
         <div class="lbl">עוד חסר לאסוף</div>
       </div>
+    </div>
+
+    <div class="tabs" style="margin-bottom:20px;">
+      <button class="tab ${profileTab==='pending'?'active':''}" onclick="switchProfileTab('pending','${userId}')">
+        ⏳ ממתינים
+        <span style="background:${profileTab==='pending'?'rgba(255,255,255,0.25)':'#e5e7eb'};color:${profileTab==='pending'?'white':'#64748b'};border-radius:99px;padding:1px 8px;font-size:11px;margin-right:6px;">${pending.length}</span>
+      </button>
+      <button class="tab ${profileTab==='archive'?'active':''}" onclick="switchProfileTab('archive','${userId}')">
+        ✅ ארכיון
+        <span style="background:${profileTab==='archive'?'rgba(255,255,255,0.25)':'#e5e7eb'};color:${profileTab==='archive'?'white':'#64748b'};border-radius:99px;padding:1px 8px;font-size:11px;margin-right:6px;">${archived.length}</span>
+      </button>
     </div>
 
     <div class="names-table-wrap">
@@ -675,38 +688,62 @@ function renderUserProfile(userId) {
         <input type="text" placeholder="🔍 חיפוש שם..." value="${phoneFilter}"
           oninput="phoneFilter=this.value;renderUserProfile('${userId}')">
         <span style="font-size:13px;color:#94a3b8;">${filtered.length} שמות</span>
-        <span style="font-size:13px;margin-right:auto;">
-          <span class="badge badge-green">${collected} הושלמו</span>
-          <span class="badge badge-gray" style="margin-right:6px;">${remaining} ממתינים</span>
-        </span>
       </div>
-      ${filtered.length === 0 ? `<div class="empty"><div class="icon">📋</div><p>${names.length === 0 ? 'אין שמות ברשימה עדיין. בקש מהמנהל להוסיף שמות.' : 'לא נמצאו תוצאות לחיפוש'}</p></div>` : `
+      ${filtered.length === 0 ? `<div class="empty"><div class="icon">${profileTab==='pending'?'🎉':'📦'}</div><p>${
+        names.length === 0 ? 'אין שמות ברשימה עדיין. בקש מהמנהל להוסיף שמות.' :
+        profileTab === 'pending' ? 'כל השמות הושלמו! כל הכבוד 🎉' : 'אין עדיין שמות עם טלפון'
+      }</p></div>` : `
       <table>
-        <thead><tr><th>#</th><th>שם</th><th>מספר טלפון</th><th>סטטוס</th></tr></thead>
+        <thead><tr><th>#</th><th>שם</th><th>מספר טלפון</th>${profileTab==='archive'?'<th>תאריך הזנה</th>':''}<th></th></tr></thead>
         <tbody>
-          ${filtered.map((n, i) => {
+          ${filtered.map((n, idx) => {
             const originalIdx = names.indexOf(n) + 1;
-            return `<tr>
-              <td class="row-num">${originalIdx}</td>
-              <td><strong>${n.name}</strong></td>
-              <td>
-                <div class="inline-flex">
-                  <input type="tel" class="phone-input ${n.phone ? 'saved' : ''}"
-                    id="ph_${n.id}" value="${n.phone || ''}"
-                    placeholder="05X-XXXXXXX"
-                    onkeydown="if(event.key==='Enter')savePhone('${userId}','${n.id}')">
-                  <button class="save-btn ${n.phone ? 'saved' : ''}" onclick="savePhone('${userId}','${n.id}')">
-                    ${n.phone ? '✓ עדכן' : 'שמור'}
-                  </button>
-                </div>
-              </td>
-              <td>${n.phone ? '<span class="badge badge-green">✓ הושלם</span>' : '<span class="badge badge-gray">ממתין</span>'}</td>
-            </tr>`;
+            if (profileTab === 'archive') {
+              const dateStr = n.phoneAddedAt ? new Date(n.phoneAddedAt).toLocaleDateString('he-IL', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+              return `<tr style="background:#f0fdf4;">
+                <td class="row-num">${originalIdx}</td>
+                <td><strong>${n.name}</strong></td>
+                <td style="direction:ltr;text-align:right;font-weight:600;color:#16a34a;">${n.phone}</td>
+                <td style="font-size:12px;color:#94a3b8;">${dateStr}</td>
+                <td><button class="btn btn-sm btn-gray" onclick="clearPhone('${userId}','${n.id}')">↩ החזר</button></td>
+              </tr>`;
+            } else {
+              return `<tr>
+                <td class="row-num">${originalIdx}</td>
+                <td><strong>${n.name}</strong></td>
+                <td>
+                  <div class="inline-flex">
+                    <input type="tel" class="phone-input"
+                      id="ph_${n.id}" value=""
+                      placeholder="05X-XXXXXXX"
+                      onkeydown="if(event.key==='Enter')savePhone('${userId}','${n.id}')">
+                    <button class="save-btn" onclick="savePhone('${userId}','${n.id}')">שמור</button>
+                  </div>
+                </td>
+                <td></td>
+              </tr>`;
+            }
           }).join('')}
         </tbody>
       </table>`}
     </div>
   `;
+}
+
+function switchProfileTab(tab, userId) {
+  profileTab = tab;
+  phoneFilter = '';
+  renderUserProfile(userId);
+}
+
+function clearPhone(userId, nameId) {
+  const names = getNames();
+  const idx = names.findIndex(n => n.id === nameId);
+  if (idx === -1) return;
+  names[idx].phone = '';
+  names[idx].phoneAddedAt = null;
+  saveNamesData(names);
+  renderUserProfile(userId);
 }
 
 function savePhone(userId, nameId) {
