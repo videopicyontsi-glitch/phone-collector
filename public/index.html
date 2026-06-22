@@ -248,6 +248,19 @@
   </div>
 </div>
 
+<!-- MODAL EXPORT OPTIONS -->
+<div class="modal-overlay" id="modalExportOptions">
+  <div class="modal">
+    <h3>📊 ייצוא לפי משתמש</h3>
+    <p style="font-size:13px;color:#64748b;margin-bottom:20px;">בחר משתמש לייצוא הטלפונים שלו לקובץ אקסל</p>
+    <div id="exportUsersList"></div>
+    <div class="modal-footer">
+      <button class="btn btn-gray" onclick="closeModal('modalExportOptions')">סגור</button>
+      <button class="btn btn-green" onclick="exportAllExcel();closeModal('modalExportOptions')">📥 ייצא את כולם יחד</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL EDIT USER -->
 <div class="modal-overlay" id="modalEditUser">
   <div class="modal">
@@ -409,7 +422,13 @@ function renderAdmin() {
       <div class="stat-card orange"><div class="label">נאספו היום</div><div class="value">${todayPhones}</div></div>
       <div class="stat-card red"><div class="label">עוד נשאר לאסוף</div><div class="value">${remaining}</div></div>
     </div>
-    <div class="section-header"><h2>ביצועי משתמשים</h2></div>
+    <div class="section-header">
+      <h2>ביצועי משתמשים</h2>
+      <div class="inline-flex" style="gap:8px;">
+        <button class="btn btn-green" onclick="exportAllExcel()">📥 ייצא הכל לאקסל</button>
+        <button class="btn btn-gray" onclick="openExportOptions()">📊 ייצוא לפי משתמש</button>
+      </div>
+    </div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>#</th><th>משתמש</th><th>שמות ברשימה</th><th>אספו</th><th>היום</th><th>נשאר</th><th>התקדמות</th><th>דירוג</th><th>פעולות</th></tr></thead>
@@ -462,6 +481,7 @@ function renderUserRows(users, names, today) {
         <div class="inline-flex" style="flex-wrap:wrap;gap:6px;">
           <button class="btn btn-sm btn-gray" onclick="openAddNames('${u.id}','${(u.displayName||u.username).replace(/'/g,"\\'")}')">✏️ שמות</button>
           <button class="btn btn-sm btn-blue" onclick="openUserDetail('${u.id}')">👁 פרטים</button>
+          <button class="btn btn-sm btn-green" onclick="exportUserExcel('${u.id}')">📥</button>
           ${u.phone ? `
           <button class="btn btn-sm" style="background:${pct>=50?'#22c55e':'#f59e0b'};color:white;" onclick="sendWhatsApp('${u.phone}','${(u.displayName||u.username).replace(/'/g,"\\'")}',${pct})">
             💬 וואטסאפ
@@ -498,6 +518,23 @@ function renderUsersManageRows(users, names) {
 function switchTab(tab) {
   adminTab = tab;
   renderAdmin();
+}
+
+function openExportOptions() {
+  const users = getUsers().filter(u => u.role !== 'admin');
+  const names = getNames();
+  const html = users.map(u => {
+    const count = names.filter(n => n.userId === u.id && n.phone).length;
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #f1f5f9;">
+      <div>
+        <strong style="font-size:14px;">${u.displayName || u.username}</strong>
+        <span style="font-size:12px;color:#94a3b8;margin-right:8px;">${count} טלפונים שנאספו</span>
+      </div>
+      <button class="btn btn-sm btn-green" ${!count?'disabled style="opacity:.4;cursor:not-allowed;"':''} onclick="exportUserExcel('${u.id}')">📥 ייצא</button>
+    </div>`;
+  }).join('') || '<div style="text-align:center;color:#aaa;padding:24px;">אין משתמשים</div>';
+  document.getElementById('exportUsersList').innerHTML = html;
+  openModal('modalExportOptions');
 }
 
 // ===================== ADD USER =====================
@@ -784,6 +821,42 @@ function savePhone(userId, nameId) {
   names[idx].phoneAddedAt = phone ? new Date().toISOString() : null;
   saveNamesData(names);
   renderUserProfile(userId);
+}
+
+// ===================== EXCEL EXPORT =====================
+function exportAllExcel() {
+  const users = getUsers().filter(u => u.role !== 'admin');
+  const names = getNames();
+  const rows = [['שם', 'טלפון', 'משתמש', 'תאריך הזנה']];
+  users.forEach(u => {
+    names.filter(n => n.userId === u.id && n.phone).forEach(n => {
+      const date = n.phoneAddedAt ? new Date(n.phoneAddedAt).toLocaleDateString('he-IL') : '';
+      rows.push([n.name, n.phone, u.displayName || u.username, date]);
+    });
+  });
+  if (rows.length === 1) { alert('אין טלפונים שנאספו עדיין'); return; }
+  downloadExcel(rows, 'כל_הטלפונים');
+}
+
+function exportUserExcel(userId) {
+  const user = getUsers().find(u => u.id === userId);
+  if (!user) return;
+  const names = getNames().filter(n => n.userId === userId && n.phone);
+  if (!names.length) { alert('אין טלפונים שנאספו עבור משתמש זה'); return; }
+  const rows = [['שם', 'טלפון', 'תאריך הזנה']];
+  names.forEach(n => {
+    const date = n.phoneAddedAt ? new Date(n.phoneAddedAt).toLocaleDateString('he-IL') : '';
+    rows.push([n.name, n.phone, date]);
+  });
+  downloadExcel(rows, `טלפונים_${user.displayName || user.username}`);
+}
+
+function downloadExcel(rows, filename) {
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{wch:20},{wch:16},{wch:18},{wch:14}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'טלפונים');
+  XLSX.writeFile(wb, `${filename}_${new Date().toLocaleDateString('he-IL').replace(/\./g,'-')}.xlsx`);
 }
 
 // ===================== WHATSAPP =====================
