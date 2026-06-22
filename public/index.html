@@ -182,27 +182,18 @@ tr:last-child td { border-bottom: none; }
   .modal-overlay { align-items: center; }
   .modal { border-radius: 16px; padding: 32px; width: 520px; }
   .modal-footer .btn { flex: none; }
-  .table-wrap { display: block; }
-  .user-cards { display: none !important; }
+  .user-card-stats { grid-template-columns: repeat(6, 1fr); }
   .profile-summary { gap: 16px; }
   .summary-card { padding: 20px; }
   .summary-card .num { font-size: 36px; }
   .summary-card .lbl { font-size: 13px; }
-  /* desktop name rows via table */
-  .name-rows-desktop { display: table !important; }
-  .name-rows-mobile { display: none !important; }
 }
 
 /* ===== MOBILE ONLY (< 768px) ===== */
 @media (max-width: 767px) {
-  .table-wrap table { display: none; }
-  .table-wrap .user-cards { display: flex; padding: 12px; }
-  .desktop-only { display: none !important; }
   .section-header { flex-direction: column; align-items: flex-start; }
   .btn-group { width: 100%; }
   .btn-group .btn { flex: 1; }
-  .name-rows-desktop { display: none !important; }
-  .name-rows-mobile { display: block !important; }
 }
 </style>
 </head>
@@ -426,20 +417,12 @@ async function renderAdmin() {
           </div>
         </div>
         ${renderStatsCards(stats)}
-        <div class="table-wrap desktop-only" style="display:block;">
-          <table><thead><tr><th>#</th><th>משתמש</th><th>שמות</th><th>אספו</th><th>היום</th><th>נשאר</th><th>✅ תומכים / ❌ לא</th><th>התקדמות</th><th>דירוג</th><th>פעולות</th></tr></thead>
-          <tbody>${renderStatsRows(stats)}</tbody></table>
-        </div>
       ` : `
         <div class="section-header">
           <h2>ניהול משתמשים</h2>
           <button class="btn btn-blue btn-sm" onclick="openModal('modalAddUser')">➕ הוסף משתמש</button>
         </div>
         ${renderUsersCards(users)}
-        <div class="table-wrap desktop-only" style="display:block;">
-          <table><thead><tr><th>שם</th><th>שם משתמש</th><th>טלפון</th><th>פעולות</th></tr></thead>
-          <tbody>${renderUsersRows(users)}</tbody></table>
-        </div>
       `}`;
   } catch(e) {
     content.innerHTML = `<div class="empty"><div class="icon">⚠️</div><p>שגיאה: ${e.message}</p></div>`;
