@@ -1,12 +1,183 @@
 const express = require('express');
+const session = require('express-session');
+const Database = require('better-sqlite3');
 const path = require('path');
+
 const app = express();
-const PORT = process.env.PORT || 3000;
+const DB_PATH = process.env.DATA_DIR ? path.join(process.env.DATA_DIR, 'phones.db') : path.join(__dirname, 'phones.db');
+const db = new Database(DB_PATH);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    role TEXT DEFAULT 'user',
+    display_name TEXT,
+    phone TEXT DEFAULT '',
+    created_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS names (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    phone TEXT DEFAULT '',
+    phone_added_at TEXT,
+    created_at TEXT
+  );
+`);
+
+const adminExists = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
+if (!adminExists) {
+  db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?,?)').run(
+    'admin', 'admin', 'admin123', 'admin', 'מנהל ראשי', '', new Date().toISOString()
+  );
+}
+
+app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'phone-collector-s3cr3t-key',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 }
+}));
 
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+const auth = (req, res, next) => {
+  if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+};
+const admin = (req, res, next) => {
+  if (!req.session.userId || req.session.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  next();
+};
+
+// ── AUTH ──
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+  const user = db.prepare('SELECT * FROM users WHERE username = ? AND password = ?').get(username, password);
+  if (!user) return res.status(401).json({ error: 'שם משתמש או סיסמה שגויים' });
+  req.session.userId = user.id;
+  req.session.role = user.role;
+  res.json({ id: user.id, username: user.username, role: user.role, displayName: user.display_name, phone: user.phone });
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.post('/api/logout', auth, (req, res) => {
+  req.session.destroy();
+  res.json({ ok: true });
+});
+
+app.get('/api/me', auth, (req, res) => {
+  const u = db.prepare('SELECT id,username,role,display_name,phone FROM users WHERE id=?').get(req.session.userId);
+  if (!u) return res.status(401).json({ error: 'not found' });
+  res.json({ id: u.id, username: u.username, role: u.role, displayName: u.display_name, phone: u.phone });
+});
+
+// ── USERS ──
+app.get('/api/users', admin, (req, res) => {
+  const rows = db.prepare("SELECT id,username,role,display_name,phone,created_at FROM users WHERE role!='admin'").all();
+  res.json(rows.map(u => ({ id: u.id, username: u.username, role: u.role, displayName: u.display_name, phone: u.phone, createdAt: u.created_at })));
+});
+
+app.post('/api/users', admin, (req, res) => {
+  const { username, password, displayName, phone } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'חסרים שדות חובה' });
+  if (password.length < 4) return res.status(400).json({ error: 'סיסמה קצרה מדי' });
+  if (db.prepare('SELECT id FROM users WHERE username=?').get(username)) return res.status(400).json({ error: 'שם משתמש כבר קיים' });
+  const id = 'u_' + Date.now();
+  db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?,?)').run(id, username, password, 'user', displayName || username, phone || '', new Date().toISOString());
+  res.json({ ok: true, id });
+});
+
+app.put('/api/users/:id', admin, (req, res) => {
+  const { displayName, phone, password } = req.body;
+  if (!db.prepare('SELECT id FROM users WHERE id=?').get(req.params.id)) return res.status(404).json({ error: 'לא נמצא' });
+  if (displayName !== undefined) db.prepare('UPDATE users SET display_name=? WHERE id=?').run(displayName, req.params.id);
+  if (phone !== undefined) db.prepare('UPDATE users SET phone=? WHERE id=?').run(phone, req.params.id);
+  if (password) {
+    if (password.length < 4) return res.status(400).json({ error: 'סיסמה קצרה מדי' });
+    db.prepare('UPDATE users SET password=? WHERE id=?').run(password, req.params.id);
+  }
+  res.json({ ok: true });
+});
+
+app.delete('/api/users/:id', admin, (req, res) => {
+  db.prepare('DELETE FROM names WHERE user_id=?').run(req.params.id);
+  db.prepare('DELETE FROM users WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ── NAMES ──
+app.get('/api/names', auth, (req, res) => {
+  const userId = req.query.userId || req.session.userId;
+  if (req.session.role !== 'admin' && userId !== req.session.userId) return res.status(403).json({ error: 'Forbidden' });
+  const rows = db.prepare('SELECT * FROM names WHERE user_id=? ORDER BY created_at ASC').all(userId);
+  res.json(rows.map(n => ({ id: n.id, userId: n.user_id, name: n.name, phone: n.phone, phoneAddedAt: n.phone_added_at, createdAt: n.created_at })));
+});
+
+app.post('/api/names', admin, (req, res) => {
+  const { userId, names, replace } = req.body;
+  if (!userId || !Array.isArray(names)) return res.status(400).json({ error: 'שגיאה בנתונים' });
+  if (replace) db.prepare("DELETE FROM names WHERE user_id=? AND (phone IS NULL OR phone='')").run(userId);
+  const existing = db.prepare('SELECT name FROM names WHERE user_id=?').all(userId).map(n => n.name);
+  const stmt = db.prepare('INSERT INTO names VALUES (?,?,?,?,?,?)');
+  let added = 0;
+  const insert = db.transaction((list) => {
+    list.forEach(name => {
+      if (!existing.includes(name)) {
+        stmt.run('n_' + Date.now() + '_' + Math.random().toString(36).substr(2,5), userId, name, '', null, new Date().toISOString());
+        existing.push(name);
+        added++;
+      }
+    });
+  });
+  insert(names);
+  res.json({ ok: true, added });
+});
+
+app.put('/api/names/:id', auth, (req, res) => {
+  const { phone } = req.body;
+  const n = db.prepare('SELECT * FROM names WHERE id=?').get(req.params.id);
+  if (!n) return res.status(404).json({ error: 'לא נמצא' });
+  if (req.session.role !== 'admin' && n.user_id !== req.session.userId) return res.status(403).json({ error: 'Forbidden' });
+  db.prepare('UPDATE names SET phone=?, phone_added_at=? WHERE id=?').run(
+    phone || '', phone ? new Date().toISOString() : null, req.params.id
+  );
+  res.json({ ok: true });
+});
+
+// ── STATS (admin overview) ──
+app.get('/api/stats', admin, (req, res) => {
+  const users = db.prepare("SELECT id,username,display_name,phone FROM users WHERE role!='admin'").all();
+  const today = new Date().toDateString();
+  const stats = users.map(u => {
+    const all = db.prepare('SELECT phone,phone_added_at FROM names WHERE user_id=?').all(u.id);
+    const collected = all.filter(n => n.phone).length;
+    const todayC = all.filter(n => n.phone && new Date(n.phone_added_at).toDateString() === today).length;
+    return {
+      userId: u.id, displayName: u.display_name, username: u.username, phone: u.phone,
+      total: all.length, collected, today: todayC,
+      remaining: all.length - collected,
+      pct: all.length ? Math.round(collected / all.length * 100) : 0
+    };
+  });
+  res.json(stats);
+});
+
+// ── EXPORT (admin) ──
+app.get('/api/export/all', admin, (req, res) => {
+  const rows = db.prepare(`
+    SELECT n.name, n.phone, u.display_name, n.phone_added_at
+    FROM names n JOIN users u ON n.user_id=u.id
+    WHERE n.phone!='' ORDER BY u.display_name, n.name
+  `).all();
+  res.json(rows.map(r => ({ name: r.name, phone: r.phone, user: r.display_name, date: r.phone_added_at })));
+});
+
+app.get('/api/export/user/:id', admin, (req, res) => {
+  const rows = db.prepare("SELECT name,phone,phone_added_at FROM names WHERE user_id=? AND phone!=''").all(req.params.id);
+  res.json(rows.map(r => ({ name: r.name, phone: r.phone, date: r.phone_added_at })));
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server on port ${PORT}`));
