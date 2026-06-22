@@ -239,9 +239,28 @@
     <input type="password" id="newPassword" placeholder="לפחות 4 תווים">
     <label>שם תצוגה</label>
     <input type="text" id="newDisplayName" placeholder="לדוגמה: יוסי לוי">
+    <label>מספר טלפון (לשליחת וואטסאפ)</label>
+    <input type="tel" id="newPhone" placeholder="050-1234567" style="direction:ltr;text-align:right;">
     <div class="modal-footer">
       <button class="btn btn-gray" onclick="closeModal('modalAddUser')">ביטול</button>
       <button class="btn btn-blue" onclick="saveNewUser()">שמור</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL EDIT USER -->
+<div class="modal-overlay" id="modalEditUser">
+  <div class="modal">
+    <h3>⚙️ עריכת משתמש</h3>
+    <label>שם תצוגה</label>
+    <input type="text" id="editDisplayName" placeholder="שם מלא">
+    <label>טלפון (לוואטסאפ)</label>
+    <input type="tel" id="editPhone" placeholder="050-1234567" style="direction:ltr;text-align:right;">
+    <label>סיסמה חדשה <span style="font-weight:normal;color:#94a3b8;">(השאר ריק לאי-שינוי)</span></label>
+    <input type="password" id="editPassword" placeholder="לפחות 4 תווים">
+    <div class="modal-footer">
+      <button class="btn btn-gray" onclick="closeModal('modalEditUser')">ביטול</button>
+      <button class="btn btn-blue" onclick="saveEditUser()">שמור</button>
     </div>
   </div>
 </div>
@@ -403,7 +422,7 @@ function renderAdmin() {
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>שם תצוגה</th><th>שם משתמש</th><th>שמות ברשימה</th><th>טלפונים שנאספו</th><th>פעולות</th></tr></thead>
+        <thead><tr><th>שם תצוגה</th><th>שם משתמש</th><th>טלפון</th><th>שמות ברשימה</th><th>טלפונים שנאספו</th><th>פעולות</th></tr></thead>
         <tbody>${renderUsersManageRows(users, names)}</tbody>
       </table>
     </div>`}
@@ -440,9 +459,13 @@ function renderUserRows(users, names, today) {
       </td>
       <td>${badge}</td>
       <td>
-        <div class="inline-flex">
+        <div class="inline-flex" style="flex-wrap:wrap;gap:6px;">
           <button class="btn btn-sm btn-gray" onclick="openAddNames('${u.id}','${(u.displayName||u.username).replace(/'/g,"\\'")}')">✏️ שמות</button>
           <button class="btn btn-sm btn-blue" onclick="openUserDetail('${u.id}')">👁 פרטים</button>
+          ${u.phone ? `
+          <button class="btn btn-sm" style="background:${pct>=50?'#22c55e':'#f59e0b'};color:white;" onclick="sendWhatsApp('${u.phone}','${(u.displayName||u.username).replace(/'/g,"\\'")}',${pct})">
+            💬 וואטסאפ
+          </button>` : `<span style="font-size:11px;color:#94a3b8;">אין טלפון</span>`}
         </div>
       </td>
     </tr>`;
@@ -458,11 +481,13 @@ function renderUsersManageRows(users, names) {
     return `<tr>
       <td><strong>${u.displayName || u.username}</strong></td>
       <td style="direction:ltr;text-align:right;">${u.username}</td>
+      <td style="direction:ltr;text-align:right;color:#64748b;">${u.phone || '<span style="color:#d1d5db;">—</span>'}</td>
       <td>${uNames.length}</td>
       <td>${collected}</td>
       <td>
-        <div class="inline-flex">
-          <button class="btn btn-sm btn-gray" onclick="openAddNames('${u.id}','${(u.displayName||u.username).replace(/'/g,"\\'")}')">✏️ ערוך שמות</button>
+        <div class="inline-flex" style="flex-wrap:wrap;gap:6px;">
+          <button class="btn btn-sm btn-gray" onclick="openAddNames('${u.id}','${(u.displayName||u.username).replace(/'/g,"\\'")}')">✏️ שמות</button>
+          <button class="btn btn-sm btn-blue" onclick="openEditUser('${u.id}')">⚙️ ערוך</button>
           <button class="btn btn-sm btn-red" onclick="deleteUser('${u.id}')">🗑 מחק</button>
         </div>
       </td>
@@ -487,12 +512,14 @@ function saveNewUser() {
   const users = getUsers();
   if (users.find(u => u.username === username)) { alert('שם משתמש כבר קיים'); return; }
 
-  users.push({ id: 'u_' + Date.now(), username, password, role: 'user', displayName: displayName || username, createdAt: new Date().toISOString() });
+  const phone = document.getElementById('newPhone').value.trim();
+  users.push({ id: 'u_' + Date.now(), username, password, role: 'user', displayName: displayName || username, phone, createdAt: new Date().toISOString() });
   saveUsers(users);
   closeModal('modalAddUser');
   document.getElementById('newUsername').value = '';
   document.getElementById('newPassword').value = '';
   document.getElementById('newDisplayName').value = '';
+  document.getElementById('newPhone').value = '';
   renderAdmin();
 }
 
@@ -757,6 +784,49 @@ function savePhone(userId, nameId) {
   names[idx].phoneAddedAt = phone ? new Date().toISOString() : null;
   saveNamesData(names);
   renderUserProfile(userId);
+}
+
+// ===================== WHATSAPP =====================
+function sendWhatsApp(phone, displayName, pct) {
+  const firstName = displayName.split(' ')[0];
+  let msg;
+  if (pct >= 50) {
+    msg = `שלום ${firstName}! 🌟\nוואו, איזה ביצועים מדהימים היום!\nהגעת כבר ל-${pct}% מהיעד שלך — זה ממש מרשים!\nתמשיך כך, אתה על המסלול הנכון 💪\nאתה כוכב! ⭐`;
+  } else {
+    msg = `שלום ${firstName}, מה שלומך? 😊\nראיתי שהיום עוד לא הגעת ליעד שלך...\nאתה עומד על ${pct}% בלבד — יש עוד מה להשלים.\nאני בטוח שאתה יכול להתאמץ קצת יותר ולסגור את הפער! 💪\nתעדכן אותי כשתתקדם 🙏`;
+  }
+  const cleaned = phone.replace(/[-\s()]/g, '');
+  const intl = cleaned.startsWith('0') ? '972' + cleaned.slice(1) : cleaned;
+  window.open(`https://wa.me/${intl}?text=${encodeURIComponent(msg)}`, '_blank');
+}
+
+// ===================== EDIT USER =====================
+let editUserId = null;
+
+function openEditUser(uid) {
+  const user = getUsers().find(u => u.id === uid);
+  if (!user) return;
+  editUserId = uid;
+  document.getElementById('editDisplayName').value = user.displayName || '';
+  document.getElementById('editPhone').value = user.phone || '';
+  document.getElementById('editPassword').value = '';
+  openModal('modalEditUser');
+}
+
+function saveEditUser() {
+  const users = getUsers();
+  const idx = users.findIndex(u => u.id === editUserId);
+  if (idx === -1) return;
+  const displayName = document.getElementById('editDisplayName').value.trim();
+  const phone = document.getElementById('editPhone').value.trim();
+  const password = document.getElementById('editPassword').value;
+  if (displayName) users[idx].displayName = displayName;
+  if (phone !== undefined) users[idx].phone = phone;
+  if (password.length >= 4) users[idx].password = password;
+  else if (password.length > 0) { alert('הסיסמה חייבת להכיל לפחות 4 תווים'); return; }
+  saveUsers(users);
+  closeModal('modalEditUser');
+  renderAdmin();
 }
 
 // ===================== MODAL HELPERS =====================
