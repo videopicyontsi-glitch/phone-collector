@@ -177,6 +177,20 @@ tr:last-child td { border-bottom: none; }
 .missing-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-left:4px; }
 .dot-red { background:#ef4444; }
 .dot-green { background:#22c55e; }
+.contact-mobile-card { display:none; }
+@media (max-width: 767px) {
+  .contact-desktop-row { display:none !important; }
+  .contact-mobile-card { display:block; background:white; border-radius:14px; box-shadow:0 2px 10px rgba(0,0,0,.07); padding:16px; margin-bottom:12px; }
+  .cmc-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+  .cmc-name { font-size:16px; font-weight:700; color:#1e293b; }
+  .cmc-num { font-size:12px; color:#94a3b8; background:#f1f5f9; padding:2px 8px; border-radius:10px; }
+  .cmc-address { font-size:12px; color:#64748b; margin-bottom:12px; }
+  .cmc-fields { display:flex; flex-direction:column; gap:10px; }
+  .cmc-field label { display:block; font-size:12px; font-weight:600; color:#64748b; margin-bottom:4px; }
+  .cmc-field .contact-inline-input, .cmc-field .contact-coord-select { width:100% !important; font-size:15px; padding:9px 12px; }
+  .contacts-table thead { display:none; }
+  .contacts-table-wrap { background:transparent; box-shadow:none; overflow:visible; }
+}
 .contacts-pagination { display:flex; align-items:center; justify-content:center; gap:12px; padding:14px; border-top:1px solid #f1f5f9; }
 .pg-btn { padding:6px 16px; border-radius:8px; border:1.5px solid #e2e8f0; background:white; font-size:13px; cursor:pointer; }
 .pg-btn:disabled { opacity:.4; cursor:default; }
@@ -683,24 +697,50 @@ function renderContactRow(c, i, users) {
   const coordOpts = ['<option value="">— ללא רכז —</option>',
     ...users.map(u=>`<option value="${u.id}" ${c.coordinatorId===u.id?'selected':''}>${esc(u.displayName)}</option>`)
   ].join('');
+  const num = (contactsPage-1)*50+i+1;
 
-  return `<tr id="crow_${c.id}">
-    <td class="row-num">${(contactsPage-1)*50+i+1}</td>
+  // Desktop table row
+  const tableRow = `<tr id="crow_${c.id}" class="contact-desktop-row">
+    <td class="row-num">${num}</td>
     <td><strong>${esc(c.lastName)}</strong></td>
     <td>${esc(c.firstName)}</td>
     <td style="font-size:12px;color:#64748b;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(c.address)}">${esc(c.address)}</td>
-    <td>
-      <span class="missing-dot ${hasPhone?'dot-green':'dot-red'}"></span>
-      <input class="contact-inline-input" id="p1_${c.id}" value="${esc(c.phone1)}" placeholder="טלפון ראשי">
-    </td>
+    <td><span class="missing-dot ${hasPhone?'dot-green':'dot-red'}"></span><input class="contact-inline-input" id="p1_${c.id}" value="${esc(c.phone1)}" placeholder="טלפון ראשי"></td>
     <td><input class="contact-inline-input" id="p2_${c.id}" value="${esc(c.phone2)}" placeholder="טלפון נוסף"></td>
-    <td>
-      <span class="missing-dot ${hasEmail?'dot-green':'dot-red'}"></span>
-      <input class="contact-inline-input" id="em_${c.id}" value="${esc(c.email)}" placeholder="מייל" style="width:150px;">
-    </td>
+    <td><span class="missing-dot ${hasEmail?'dot-green':'dot-red'}"></span><input class="contact-inline-input" id="em_${c.id}" value="${esc(c.email)}" placeholder="מייל" style="width:150px;"></td>
     <td><select class="contact-coord-select" id="co_${c.id}">${coordOpts}</select></td>
     <td><button class="contact-save-btn" onclick="saveContact('${c.id}')">שמור</button></td>
   </tr>`;
+
+  // Mobile card
+  const mobileCard = `<div class="contact-mobile-card" id="ccard_${c.id}">
+    <div class="cmc-header">
+      <span class="cmc-name">${esc(c.lastName)} ${esc(c.firstName)}</span>
+      <span class="cmc-num">${num}</span>
+    </div>
+    ${c.address ? `<div class="cmc-address">${esc(c.address)}</div>` : ''}
+    <div class="cmc-fields">
+      <div class="cmc-field">
+        <label><span class="missing-dot ${hasPhone?'dot-green':'dot-red'}"></span> טלפון ראשי</label>
+        <input class="contact-inline-input" id="mp1_${c.id}" value="${esc(c.phone1)}" placeholder="הכנס טלפון ראשי" type="tel">
+      </div>
+      <div class="cmc-field">
+        <label>טלפון נוסף</label>
+        <input class="contact-inline-input" id="mp2_${c.id}" value="${esc(c.phone2)}" placeholder="טלפון נוסף" type="tel">
+      </div>
+      <div class="cmc-field">
+        <label><span class="missing-dot ${hasEmail?'dot-green':'dot-red'}"></span> מייל</label>
+        <input class="contact-inline-input" id="mem_${c.id}" value="${esc(c.email)}" placeholder="כתובת מייל" type="email">
+      </div>
+      <div class="cmc-field">
+        <label>רכז משויך</label>
+        <select class="contact-coord-select" id="mco_${c.id}" style="width:100%;">${coordOpts}</select>
+      </div>
+    </div>
+    <button class="contact-save-btn" style="width:100%;margin-top:10px;padding:10px;" onclick="saveContactMobile('${c.id}')">שמור פרטים</button>
+  </div>`;
+
+  return tableRow + mobileCard;
 }
 
 async function saveContact(id) {
@@ -712,13 +752,24 @@ async function saveContact(id) {
     await PUT('/api/contacts/'+id, { phone1, phone2, email, coordinatorId });
     const btn = document.querySelector(`#crow_${id} .contact-save-btn`);
     if (btn) { btn.textContent='✓ נשמר'; btn.style.background='#22c55e'; setTimeout(()=>{btn.textContent='שמור';btn.style.background='';},1500); }
-    // update dots in-place
-    const row = document.getElementById('crow_'+id);
-    if (row) {
-      const dots = row.querySelectorAll('.missing-dot');
-      dots[0].className = 'missing-dot ' + ((phone1||phone2)?'dot-green':'dot-red');
-      dots[1].className = 'missing-dot ' + (email?'dot-green':'dot-red');
-    }
+    const dots = document.querySelectorAll(`#crow_${id} .missing-dot`);
+    if (dots[0]) dots[0].className='missing-dot '+((phone1||phone2)?'dot-green':'dot-red');
+    if (dots[1]) dots[1].className='missing-dot '+(email?'dot-green':'dot-red');
+  } catch(e) { alert('שגיאה: '+e.message); }
+}
+
+async function saveContactMobile(id) {
+  const phone1 = document.getElementById('mp1_'+id)?.value || '';
+  const phone2 = document.getElementById('mp2_'+id)?.value || '';
+  const email  = document.getElementById('mem_'+id)?.value || '';
+  const coordinatorId = document.getElementById('mco_'+id)?.value || '';
+  try {
+    await PUT('/api/contacts/'+id, { phone1, phone2, email, coordinatorId });
+    const btn = document.querySelector(`#ccard_${id} .contact-save-btn`);
+    if (btn) { btn.textContent='✓ נשמר'; btn.style.background='#22c55e'; setTimeout(()=>{btn.textContent='שמור פרטים';btn.style.background='';},1800); }
+    const dots = document.querySelectorAll(`#ccard_${id} .missing-dot`);
+    if (dots[0]) dots[0].className='missing-dot '+((phone1||phone2)?'dot-green':'dot-red');
+    if (dots[1]) dots[1].className='missing-dot '+(email?'dot-green':'dot-red');
   } catch(e) { alert('שגיאה: '+e.message); }
 }
 
