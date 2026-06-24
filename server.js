@@ -229,6 +229,35 @@ app.put('/api/names/:id', auth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ── MY ASSIGNED CONTACTS (for coordinators) ──
+app.get('/api/my-contacts', auth, (req, res) => {
+  const { q } = req.query;
+  let sql = 'SELECT * FROM contacts WHERE coordinator_id=?';
+  const params = [req.session.userId];
+  if (q) { sql += ' AND (last_name LIKE ? OR first_name LIKE ? OR address LIKE ?)'; const l=`%${q}%`; params.push(l,l,l); }
+  sql += ' ORDER BY last_name, first_name';
+  const rows = db.prepare(sql).all(...params);
+  res.json(rows.map(r => ({
+    id: r.id, lastName: r.last_name, firstName: r.first_name,
+    address: r.address, phone1: r.phone1, phone2: r.phone2,
+    email: r.email, branchStatus: r.branch_status
+  })));
+});
+
+// allow coordinator to update their own assigned contacts
+app.put('/api/my-contacts/:id', auth, (req, res) => {
+  const c = db.prepare('SELECT id,coordinator_id FROM contacts WHERE id=?').get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'לא נמצא' });
+  if (req.session.role !== 'admin' && c.coordinator_id !== req.session.userId)
+    return res.status(403).json({ error: 'Forbidden' });
+  const { phone1, phone2, email } = req.body;
+  const now = new Date().toISOString();
+  if (phone1 !== undefined) db.prepare('UPDATE contacts SET phone1=?,updated_at=? WHERE id=?').run(phone1,now,req.params.id);
+  if (phone2 !== undefined) db.prepare('UPDATE contacts SET phone2=?,updated_at=? WHERE id=?').run(phone2,now,req.params.id);
+  if (email  !== undefined) db.prepare('UPDATE contacts SET email=?,updated_at=? WHERE id=?').run(email,now,req.params.id);
+  res.json({ ok: true });
+});
+
 // ── STATS (admin overview) ──
 app.get('/api/stats', admin, (req, res) => {
   const users = db.prepare("SELECT id,username,display_name,phone FROM users WHERE role!='admin'").all();

@@ -993,6 +993,7 @@ async function renderUserProfile(userId) {
   try {
     profileNames = await GET(`/api/names?userId=${userId}`);
     renderProfileView(userId);
+    if (profileTab==='assigned') loadAssignedContacts();
   } catch(e) {
     document.getElementById('mainContent').innerHTML=`<div class="empty"><div class="icon">⚠️</div><p>${e.message}</p></div>`;
   }
@@ -1030,9 +1031,14 @@ function renderProfileView(userId) {
       <button class="tab ${profileTab==='archive'?'active':''}" onclick="switchProfileTab('archive','${userId}')">
         ✅ ארכיון (${archived.length})
       </button>
+      <button class="tab ${profileTab==='assigned'?'active':''}" onclick="switchProfileTab('assigned','${userId}')">
+        👥 משוייכים אליי
+      </button>
     </div>
 
-    <div class="names-table-wrap">
+    ${profileTab==='assigned' ? `<div id="assignedContactsSection"></div>` : ''}
+
+    <div class="names-table-wrap" ${profileTab==='assigned'?'style="display:none"':''}>
       <div class="search-bar">
         <input type="text" placeholder="🔍 חיפוש שם..." value="${phoneFilter}" oninput="phoneFilter=this.value;renderProfileView('${userId}')">
         <span class="search-bar-count">${filtered.length} שמות</span>
@@ -1093,7 +1099,75 @@ function renderProfileView(userId) {
     </div>`;
 }
 
-function switchProfileTab(tab,userId) { profileTab=tab; phoneFilter=''; renderProfileView(userId); }
+function switchProfileTab(tab,userId) {
+  profileTab=tab; phoneFilter=''; renderProfileView(userId);
+  if (tab==='assigned') loadAssignedContacts();
+}
+
+async function loadAssignedContacts(q='') {
+  const el = document.getElementById('assignedContactsSection');
+  if (!el) return;
+  el.innerHTML = `<div style="padding:24px;text-align:center;">${loading()}</div>`;
+  try {
+    const params = q ? `?q=${encodeURIComponent(q)}` : '';
+    const contacts = await GET('/api/my-contacts'+params);
+    if (!contacts.length) {
+      el.innerHTML = `<div class="empty"><div class="icon">👥</div><p>אין אנשי קשר משוייכים אליך עדיין</p></div>`;
+      return;
+    }
+    el.innerHTML = `
+      <div class="names-table-wrap">
+        <div class="search-bar">
+          <input type="text" placeholder="🔍 חיפוש שם, כתובת..." value="${q}"
+            oninput="loadAssignedContacts(this.value)">
+          <span class="search-bar-count">${contacts.length} אנשי קשר</span>
+        </div>
+        ${contacts.map(c => {
+          const hasPhone = c.phone1 || c.phone2;
+          const hasEmail = c.email;
+          return `<div class="name-row" id="ac_${c.id}">
+            <div class="name-row-top">
+              <span class="name-row-label" style="font-size:16px;">${esc(c.lastName)} ${esc(c.firstName)}</span>
+              ${hasPhone ? '<span class="badge badge-green" style="font-size:11px;">✓ טלפון</span>' : '<span class="badge badge-red" style="font-size:11px;">חסר טלפון</span>'}
+            </div>
+            ${c.address ? `<div style="font-size:12px;color:#94a3b8;margin:2px 0 8px;">${esc(c.address)}</div>` : ''}
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="display:flex;gap:8px;align-items:center;">
+                <input type="tel" class="phone-input" id="ac_p1_${c.id}" value="${esc(c.phone1)}" placeholder="טלפון ראשי" style="flex:1;">
+                <input type="tel" class="phone-input" id="ac_p2_${c.id}" value="${esc(c.phone2)}" placeholder="טלפון נוסף" style="flex:1;">
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <input type="email" class="phone-input" id="ac_em_${c.id}" value="${esc(c.email)}" placeholder="כתובת מייל" style="flex:1;">
+                <button class="save-btn" onclick="saveAssignedContact('${c.id}')">שמור</button>
+              </div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+  } catch(e) {
+    el.innerHTML = `<div class="empty"><div class="icon">⚠️</div><p>שגיאה: ${e.message}</p></div>`;
+  }
+}
+
+async function saveAssignedContact(id) {
+  const phone1 = document.getElementById('ac_p1_'+id)?.value.trim() || '';
+  const phone2 = document.getElementById('ac_p2_'+id)?.value.trim() || '';
+  const email  = document.getElementById('ac_em_'+id)?.value.trim() || '';
+  try {
+    await PUT('/api/my-contacts/'+id, { phone1, phone2, email });
+    const row = document.getElementById('ac_'+id);
+    if (row) {
+      const badge = row.querySelector('.badge');
+      if (badge) {
+        const hasPhone = phone1 || phone2;
+        badge.className = 'badge ' + (hasPhone ? 'badge-green' : 'badge-red');
+        badge.textContent = hasPhone ? '✓ טלפון' : 'חסר טלפון';
+      }
+      const btn = row.querySelector('.save-btn');
+      if (btn) { btn.textContent='✓ נשמר'; btn.style.background='#22c55e'; setTimeout(()=>{btn.textContent='שמור';btn.style.background='';},1500); }
+    }
+  } catch(e) { alert('שגיאה: '+e.message); }
+}
 
 async function savePhone(userId, nameId) {
   const input = document.getElementById('ph_'+nameId);
