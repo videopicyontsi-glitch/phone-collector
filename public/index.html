@@ -160,6 +160,32 @@ tr:last-child td { border-bottom: none; }
 .support-btn.active-green { background: #dcfce7; border-color: #22c55e; color: #16a34a; }
 .support-btn.active-red   { background: #fee2e2; border-color: #ef4444; color: #dc2626; }
 
+/* ===== CONTACTS TABLE ===== */
+.contacts-toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px; }
+.contacts-toolbar select, .contacts-toolbar input[type=text] { padding:8px 12px; border:1.5px solid #e2e8f0; border-radius:9px; font-size:14px; font-family:inherit; background:white; min-width:160px; }
+.contacts-table-wrap { background:white; border-radius:14px; box-shadow:0 2px 12px rgba(0,0,0,.07); overflow:hidden; }
+.contacts-table { width:100%; border-collapse:collapse; font-size:13px; }
+.contacts-table th { background:#f8fafc; padding:11px 12px; font-weight:700; color:#475569; border-bottom:2px solid #e2e8f0; text-align:right; white-space:nowrap; }
+.contacts-table td { padding:9px 12px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+.contacts-table tr:last-child td { border-bottom:none; }
+.contacts-table tr:hover td { background:#f8fafc; }
+.contact-inline-input { border:1.5px solid #e2e8f0; border-radius:7px; padding:5px 9px; font-size:13px; font-family:inherit; background:#f8fafc; width:130px; }
+.contact-inline-input:focus { border-color:#3b82f6; background:white; outline:none; }
+.contact-save-btn { padding:5px 12px; border-radius:7px; border:none; background:#3b82f6; color:white; font-size:12px; font-weight:600; cursor:pointer; white-space:nowrap; }
+.contact-save-btn:active { opacity:.8; }
+.contact-coord-select { border:1.5px solid #e2e8f0; border-radius:7px; padding:5px 8px; font-size:12px; font-family:inherit; background:#f8fafc; max-width:130px; }
+.missing-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-left:4px; }
+.dot-red { background:#ef4444; }
+.dot-green { background:#22c55e; }
+.contacts-pagination { display:flex; align-items:center; justify-content:center; gap:12px; padding:14px; border-top:1px solid #f1f5f9; }
+.pg-btn { padding:6px 16px; border-radius:8px; border:1.5px solid #e2e8f0; background:white; font-size:13px; cursor:pointer; }
+.pg-btn:disabled { opacity:.4; cursor:default; }
+.pg-info { font-size:13px; color:#64748b; }
+.contacts-stat-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; margin-bottom:20px; }
+.contacts-stat-card { background:white; border-radius:12px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,.06); text-align:center; }
+.contacts-stat-card .cs-val { font-size:26px; font-weight:800; }
+.contacts-stat-card .cs-lbl { font-size:12px; color:#64748b; margin-top:4px; }
+
 /* ===== MISC ===== */
 .inline-flex { display: flex; align-items: center; gap: 8px; }
 .row-num { color: #94a3b8; font-size: 12px; }
@@ -310,6 +336,27 @@ tr:last-child td { border-bottom: none; }
   </div>
 </div>
 
+<!-- MODAL IMPORT CONTACTS -->
+<div class="modal-overlay" id="modalImportContacts" style="display:none;">
+  <div class="modal" style="max-width:500px;">
+    <h3>📂 ייבוא רשימת תושבים מאקסל</h3>
+    <p style="font-size:14px;color:#64748b;margin:10px 0 18px;">
+      הקובץ צריך לכלול עמודות: <strong>שם משפחה, שם פרטי, כתובת, טלפון ראשי, טלפון נוסף, דוא"ל</strong><br>
+      רשומות קיימות (לפי קוד תושב) לא יוחלפו.
+    </p>
+    <div class="upload-area" onclick="document.getElementById('importContactsFile').click()">
+      <input type="file" id="importContactsFile" accept=".xlsx,.xls" style="display:none;">
+      <div style="font-size:32px;">📊</div>
+      <div id="importContactsFileName" style="margin-top:6px;color:#64748b;">לחץ לבחירת קובץ אקסל</div>
+    </div>
+    <div id="importContactsResult"></div>
+    <div class="modal-footer">
+      <button class="btn btn-gray" onclick="closeModal('modalImportContacts')">ביטול</button>
+      <button class="btn btn-blue" id="btnDoImport" onclick="doImportContacts()">ייבא</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL USER DETAIL -->
 <div class="modal-overlay" id="modalUserDetail">
   <div class="modal" style="max-width:680px;">
@@ -384,6 +431,7 @@ function renderApp() {
 let adminTab = 'overview';
 
 async function renderAdmin() {
+  if (adminTab === 'contacts') { renderContactsTab(); return; }
   const content = document.getElementById('mainContent');
   content.innerHTML = loading();
   try {
@@ -402,6 +450,7 @@ async function renderAdmin() {
       <div class="tabs">
         <button class="tab ${adminTab==='overview'?'active':''}" onclick="switchTab('overview')">סקירה כללית</button>
         <button class="tab ${adminTab==='users'?'active':''}" onclick="switchTab('users')">משתמשים</button>
+        <button class="tab ${adminTab==='contacts'?'active':''}" onclick="switchTab('contacts')">רשימת תושבים</button>
       </div>
 
       ${adminTab === 'overview' ? `
@@ -535,6 +584,222 @@ function renderUsersRows(users) {
 }
 
 function switchTab(tab) { adminTab=tab; renderAdmin(); }
+
+// ===== CONTACTS TAB =====
+let contactsPage = 1;
+let contactsFilter = { missing: '', coordinator: '', q: '' };
+let coordinatorsList = [];
+
+function adminTabsHtml() {
+  return `<div class="tabs">
+    <button class="tab ${adminTab==='overview'?'active':''}" onclick="switchTab('overview')">סקירה כללית</button>
+    <button class="tab ${adminTab==='users'?'active':''}" onclick="switchTab('users')">משתמשים</button>
+    <button class="tab ${adminTab==='contacts'?'active':''}" onclick="switchTab('contacts')">רשימת תושבים</button>
+  </div>`;
+}
+
+async function renderContactsTab() {
+  const content = document.getElementById('mainContent');
+  content.innerHTML = loading();
+  try {
+    const [cstats, users] = await Promise.all([
+      GET('/api/contacts/stats'),
+      GET('/api/users')
+    ]);
+    coordinatorsList = users;
+
+    const params = new URLSearchParams({ page: contactsPage, limit: 50 });
+    if (contactsFilter.missing)     params.set('missing', contactsFilter.missing);
+    if (contactsFilter.coordinator) params.set('coordinator', contactsFilter.coordinator);
+    if (contactsFilter.q)           params.set('q', contactsFilter.q);
+    const data = await GET('/api/contacts?' + params);
+
+    const coordOptions = ['<option value="">כל הרכזים</option>',
+      '<option value="none">לא שויך</option>',
+      ...users.map(u=>`<option value="${u.id}" ${contactsFilter.coordinator===u.id?'selected':''}>${esc(u.displayName)}</option>`)
+    ].join('');
+
+    const totalPages = Math.ceil(data.total / 50);
+
+    content.innerHTML = `
+      ${adminTabsHtml()}
+      <div class="contacts-stat-grid">
+        <div class="contacts-stat-card"><div class="cs-val" style="color:#3b82f6">${cstats.total.toLocaleString()}</div><div class="cs-lbl">סה״כ תושבים</div></div>
+        <div class="contacts-stat-card"><div class="cs-val" style="color:#ef4444">${cstats.missingPhone.toLocaleString()}</div><div class="cs-lbl">חסר טלפון</div></div>
+        <div class="contacts-stat-card"><div class="cs-val" style="color:#f59e0b">${cstats.missingEmail.toLocaleString()}</div><div class="cs-lbl">חסר מייל</div></div>
+        <div class="contacts-stat-card"><div class="cs-val" style="color:#22c55e">${cstats.complete.toLocaleString()}</div><div class="cs-lbl">פרטים מלאים</div></div>
+        <div class="contacts-stat-card"><div class="cs-val" style="color:#8b5cf6">${cstats.assigned.toLocaleString()}</div><div class="cs-lbl">משויכים לרכז</div></div>
+      </div>
+
+      <div class="section-header" style="margin-bottom:14px;">
+        <h2>רשימת תושבים</h2>
+        <div class="btn-group">
+          <button class="btn btn-blue btn-sm" onclick="openImportContactsModal()">📂 ייבא אקסל</button>
+          <button class="btn btn-green btn-sm" onclick="exportContactsExcel()">📥 ייצא לאקסל</button>
+        </div>
+      </div>
+
+      <div class="contacts-toolbar">
+        <input type="text" placeholder="🔍 חיפוש שם, כתובת, טלפון..." value="${esc(contactsFilter.q)}"
+          oninput="contactsFilter.q=this.value;contactsPage=1;renderContactsTab()" style="flex:1;min-width:200px;">
+        <select onchange="contactsFilter.missing=this.value;contactsPage=1;renderContactsTab()">
+          <option value="" ${!contactsFilter.missing?'selected':''}>כל הסטטוסים</option>
+          <option value="phone" ${contactsFilter.missing==='phone'?'selected':''}>חסר טלפון</option>
+          <option value="email" ${contactsFilter.missing==='email'?'selected':''}>חסר מייל</option>
+          <option value="any"   ${contactsFilter.missing==='any'?'selected':''}>חסר כלשהו</option>
+        </select>
+        <select onchange="contactsFilter.coordinator=this.value;contactsPage=1;renderContactsTab()">${coordOptions}</select>
+        <span style="font-size:13px;color:#64748b;white-space:nowrap;">${data.total.toLocaleString()} תוצאות</span>
+      </div>
+
+      <div class="contacts-table-wrap">
+        <table class="contacts-table">
+          <thead><tr>
+            <th>#</th><th>שם משפחה</th><th>שם פרטי</th><th>כתובת</th>
+            <th>טלפון ראשי</th><th>טלפון נוסף</th><th>מייל</th>
+            <th>רכז</th><th>שמור</th>
+          </tr></thead>
+          <tbody>
+            ${data.rows.length ? data.rows.map((c,i)=>renderContactRow(c,i,users)).join('') :
+              '<tr><td colspan="9" style="text-align:center;padding:40px;color:#94a3b8;">אין תוצאות</td></tr>'}
+          </tbody>
+        </table>
+        ${totalPages > 1 ? `
+        <div class="contacts-pagination">
+          <button class="pg-btn" onclick="contactsPage=${contactsPage-1};renderContactsTab()" ${contactsPage<=1?'disabled':''}>→ הקודם</button>
+          <span class="pg-info">עמוד ${contactsPage} מתוך ${totalPages}</span>
+          <button class="pg-btn" onclick="contactsPage=${contactsPage+1};renderContactsTab()" ${contactsPage>=totalPages?'disabled':''}>הבא ←</button>
+        </div>` : ''}
+      </div>`;
+  } catch(e) {
+    document.getElementById('mainContent').innerHTML =
+      `<div class="empty"><div class="icon">⚠️</div><p>שגיאה: ${e.message}</p></div>`;
+  }
+}
+
+function renderContactRow(c, i, users) {
+  const hasPhone = c.phone1 || c.phone2;
+  const hasEmail = c.email;
+  const coordOpts = ['<option value="">— ללא רכז —</option>',
+    ...users.map(u=>`<option value="${u.id}" ${c.coordinatorId===u.id?'selected':''}>${esc(u.displayName)}</option>`)
+  ].join('');
+
+  return `<tr id="crow_${c.id}">
+    <td class="row-num">${(contactsPage-1)*50+i+1}</td>
+    <td><strong>${esc(c.lastName)}</strong></td>
+    <td>${esc(c.firstName)}</td>
+    <td style="font-size:12px;color:#64748b;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(c.address)}">${esc(c.address)}</td>
+    <td>
+      <span class="missing-dot ${hasPhone?'dot-green':'dot-red'}"></span>
+      <input class="contact-inline-input" id="p1_${c.id}" value="${esc(c.phone1)}" placeholder="טלפון ראשי">
+    </td>
+    <td><input class="contact-inline-input" id="p2_${c.id}" value="${esc(c.phone2)}" placeholder="טלפון נוסף"></td>
+    <td>
+      <span class="missing-dot ${hasEmail?'dot-green':'dot-red'}"></span>
+      <input class="contact-inline-input" id="em_${c.id}" value="${esc(c.email)}" placeholder="מייל" style="width:150px;">
+    </td>
+    <td><select class="contact-coord-select" id="co_${c.id}">${coordOpts}</select></td>
+    <td><button class="contact-save-btn" onclick="saveContact('${c.id}')">שמור</button></td>
+  </tr>`;
+}
+
+async function saveContact(id) {
+  const phone1 = document.getElementById('p1_'+id)?.value || '';
+  const phone2 = document.getElementById('p2_'+id)?.value || '';
+  const email  = document.getElementById('em_'+id)?.value || '';
+  const coordinatorId = document.getElementById('co_'+id)?.value || '';
+  try {
+    await PUT('/api/contacts/'+id, { phone1, phone2, email, coordinatorId });
+    const btn = document.querySelector(`#crow_${id} .contact-save-btn`);
+    if (btn) { btn.textContent='✓ נשמר'; btn.style.background='#22c55e'; setTimeout(()=>{btn.textContent='שמור';btn.style.background='';},1500); }
+    // update dots in-place
+    const row = document.getElementById('crow_'+id);
+    if (row) {
+      const dots = row.querySelectorAll('.missing-dot');
+      dots[0].className = 'missing-dot ' + ((phone1||phone2)?'dot-green':'dot-red');
+      dots[1].className = 'missing-dot ' + (email?'dot-green':'dot-red');
+    }
+  } catch(e) { alert('שגיאה: '+e.message); }
+}
+
+function openImportContactsModal() {
+  document.getElementById('modalImportContacts').style.display='flex';
+  document.getElementById('importContactsResult').textContent='';
+}
+
+async function doImportContacts() {
+  const fileInput = document.getElementById('importContactsFile');
+  if (!fileInput.files.length) { alert('בחר קובץ אקסל'); return; }
+  const file = fileInput.files[0];
+  const btn = document.getElementById('btnDoImport');
+  btn.disabled = true; btn.textContent = 'מייבא...';
+
+  try {
+    const data = await file.arrayBuffer();
+    const wb = XLSX.read(data, { type:'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const raw = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
+
+    // find header row (row with שם משפחה)
+    let headerIdx = 0;
+    for (let i=0;i<Math.min(raw.length,5);i++) {
+      if (raw[i].some(c=>String(c).includes('שם משפחה'))) { headerIdx=i; break; }
+    }
+    const headers = raw[headerIdx].map(h=>String(h).trim());
+    const col = name => headers.findIndex(h=>h.includes(name));
+
+    const iCode    = col('קוד תושב');
+    const iLast    = col('שם משפחה');
+    const iFirst   = col('שם פרטי');
+    const iAddr    = col('כתובת');
+    const iPhone1  = col('טלפון ראשי');
+    const iPhone2  = col('טלפון נוסף');
+    const iEmail   = col('דוא');
+    const iStatus  = col('סטטוס');
+
+    const rows = raw.slice(headerIdx+1).filter(r=>r[iLast]||r[iFirst]).map(r=>({
+      resident_code: iCode>=0  ? String(r[iCode]||'').trim()  : '',
+      last_name:     iLast>=0  ? String(r[iLast]||'').trim()  : '',
+      first_name:    iFirst>=0 ? String(r[iFirst]||'').trim() : '',
+      address:       iAddr>=0  ? String(r[iAddr]||'').trim()  : '',
+      phone1:        iPhone1>=0? String(r[iPhone1]||'').trim(): '',
+      phone2:        iPhone2>=0? String(r[iPhone2]||'').trim(): '',
+      email:         iEmail>=0 ? String(r[iEmail]||'').trim() : '',
+      branch_status: iStatus>=0? String(r[iStatus]||'').trim(): '',
+    }));
+
+    if (!rows.length) { alert('לא נמצאו שורות בקובץ'); btn.disabled=false; btn.textContent='ייבא'; return; }
+
+    const result = await POST('/api/contacts/import', { rows });
+    document.getElementById('importContactsResult').innerHTML =
+      `<div style="color:#16a34a;font-weight:600;margin-top:12px;">✅ יובאו ${result.added} רשומות חדשות | ${result.skipped} כבר קיימות</div>`;
+    fileInput.value='';
+    setTimeout(()=>{ closeModal('modalImportContacts'); renderContactsTab(); }, 1800);
+  } catch(e) {
+    document.getElementById('importContactsResult').innerHTML =
+      `<div style="color:#ef4444;margin-top:12px;">שגיאה: ${e.message}</div>`;
+  } finally { btn.disabled=false; btn.textContent='ייבא'; }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('importContactsFile')?.addEventListener('change', e => {
+    const name = e.target.files[0]?.name || 'לחץ לבחירת קובץ אקסל';
+    document.getElementById('importContactsFileName').textContent = name;
+  });
+});
+
+async function exportContactsExcel() {
+  try {
+    const params = new URLSearchParams({ limit: 99999 });
+    if (contactsFilter.missing)     params.set('missing', contactsFilter.missing);
+    if (contactsFilter.coordinator) params.set('coordinator', contactsFilter.coordinator);
+    if (contactsFilter.q)           params.set('q', contactsFilter.q);
+    const data = await GET('/api/contacts?' + params);
+    const rows = [['שם משפחה','שם פרטי','כתובת','טלפון ראשי','טלפון נוסף','מייל','רכז','סטטוס'],
+      ...data.rows.map(c=>[c.lastName,c.firstName,c.address,c.phone1,c.phone2,c.email,c.coordinatorName,c.branchStatus])];
+    dlExcel(rows, 'רשימת_תושבים');
+  } catch(e) { alert(e.message); }
+}
 
 function filterAdminCards() {
   const q = (document.getElementById('adminSearch')?.value || '').trim().toLowerCase();

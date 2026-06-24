@@ -29,6 +29,26 @@ db.exec(`
 // migration: add support_status column if missing
 try { db.exec("ALTER TABLE names ADD COLUMN support_status TEXT DEFAULT ''"); } catch {}
 
+// contacts table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS contacts (
+    id TEXT PRIMARY KEY,
+    resident_code TEXT UNIQUE,
+    last_name TEXT,
+    first_name TEXT,
+    address TEXT DEFAULT '',
+    phone1 TEXT DEFAULT '',
+    phone2 TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    branch_status TEXT DEFAULT '',
+    coordinator_id TEXT DEFAULT '',
+    created_at TEXT,
+    updated_at TEXT
+  );
+`);
+try { db.exec("ALTER TABLE contacts ADD COLUMN coordinator_id TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE contacts ADD COLUMN notes TEXT DEFAULT ''"); } catch {}
+
 const adminExists = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
 if (!adminExists) {
   db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?,?)').run(
@@ -243,6 +263,102 @@ app.get('/api/export/all', admin, (req, res) => {
 app.get('/api/export/user/:id', admin, (req, res) => {
   const rows = db.prepare("SELECT name,phone,support_status,phone_added_at FROM names WHERE user_id=? AND phone!=''").all(req.params.id);
   res.json(rows.map(r => ({ name: r.name, phone: r.phone, support: r.support_status, date: r.phone_added_at })));
+});
+
+// ── CONTACTS ──
+
+// Import from Excel (JSON payload sent from client-side SheetJS parsing)
+app.post('/api/contacts/import', admin, (req, res) => {
+  const { rows } = req.body; // [{resident_code, last_name, first_name, address, phone1, phone2, email, branch_status}]
+  if (!Array.isArray(rows)) return res.status(400).json({ error: 'שגיאה בנתונים' });
+
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO contacts (id,resident_code,last_name,first_name,address,phone1,phone2,email,branch_status,coordinator_id,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+  `);
+  const now = new Date().toISOString();
+  let added = 0, skipped = 0;
+
+  const run = db.transaction(() => {
+    rows.forEach(r => {
+      const result = insert.run(
+        'c_' + Date.now() + '_' + Math.random().toString(36).substr(2,6),
+        r.resident_code || null,
+        r.last_name || '', r.first_name || '',
+        r.address || '', r.phone1 || '', r.phone2 || '',
+        r.email || '', r.branch_status || '', '', now, now
+      );
+      if (result.changes > 0) added++; else skipped++;
+    });
+  });
+  run();
+  res.json({ ok: true, added, skipped, total: rows.length });
+});
+
+// Get contacts — supports filter: missing=phone|email|any, coordinator=id, q=search
+app.get('/api/contacts', admin, (req, res) => {
+  const { missing, coordinator, q, page = 1, limit = 50 } = req.query;
+  let where = [];
+  let params = [];
+
+  if (missing === 'phone')  { where.push("(phone1='' AND phone2='')"); }
+  if (missing === 'email')  { where.push("email=''"); }
+  if (missing === 'any')    { where.push("(phone1='' AND phone2='' OR email='')"); }
+  if (coordinator === 'none') { where.push("(coordinator_id='' OR coordinator_id IS NULL)"); }
+  else if (coordinator)     { where.push("coordinator_id=?"); params.push(coordinator); }
+  if (q) {
+    where.push("(last_name LIKE ? OR first_name LIKE ? OR address LIKE ? OR phone1 LIKE ? OR phone2 LIKE ? OR email LIKE ?)");
+    const like = `%${q}%`;
+    params.push(like, like, like, like, like, like);
+  }
+
+  const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  const total = db.prepare(`SELECT COUNT(*) as n FROM contacts ${whereClause}`).get(...params).n;
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+  const rows = db.prepare(`
+    SELECT c.*, u.display_name as coordinator_name
+    FROM contacts c
+    LEFT JOIN users u ON c.coordinator_id = u.id
+    ${whereClause}
+    ORDER BY c.last_name, c.first_name
+    LIMIT ? OFFSET ?
+  `).all(...params, parseInt(limit), offset);
+
+  res.json({ total, page: parseInt(page), rows: rows.map(r => ({
+    id: r.id, residentCode: r.resident_code,
+    lastName: r.last_name, firstName: r.first_name,
+    address: r.address, phone1: r.phone1, phone2: r.phone2,
+    email: r.email, branchStatus: r.branch_status,
+    coordinatorId: r.coordinator_id, coordinatorName: r.coordinator_name || '',
+    notes: r.notes || '', createdAt: r.created_at, updatedAt: r.updated_at
+  }))});
+});
+
+app.put('/api/contacts/:id', admin, (req, res) => {
+  const { phone1, phone2, email, coordinatorId, notes } = req.body;
+  const c = db.prepare('SELECT id FROM contacts WHERE id=?').get(req.params.id);
+  if (!c) return res.status(404).json({ error: 'לא נמצא' });
+  const now = new Date().toISOString();
+  if (phone1      !== undefined) db.prepare('UPDATE contacts SET phone1=?, updated_at=? WHERE id=?').run(phone1, now, req.params.id);
+  if (phone2      !== undefined) db.prepare('UPDATE contacts SET phone2=?, updated_at=? WHERE id=?').run(phone2, now, req.params.id);
+  if (email       !== undefined) db.prepare('UPDATE contacts SET email=?, updated_at=? WHERE id=?').run(email, now, req.params.id);
+  if (coordinatorId !== undefined) db.prepare('UPDATE contacts SET coordinator_id=?, updated_at=? WHERE id=?').run(coordinatorId, now, req.params.id);
+  if (notes       !== undefined) db.prepare('UPDATE contacts SET notes=?, updated_at=? WHERE id=?').run(notes, now, req.params.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/contacts', admin, (req, res) => {
+  db.prepare('DELETE FROM contacts').run();
+  res.json({ ok: true });
+});
+
+app.get('/api/contacts/stats', admin, (req, res) => {
+  const total       = db.prepare("SELECT COUNT(*) as n FROM contacts").get().n;
+  const missingPhone= db.prepare("SELECT COUNT(*) as n FROM contacts WHERE phone1='' AND phone2=''").get().n;
+  const missingEmail= db.prepare("SELECT COUNT(*) as n FROM contacts WHERE email=''").get().n;
+  const assigned    = db.prepare("SELECT COUNT(*) as n FROM contacts WHERE coordinator_id!='' AND coordinator_id IS NOT NULL").get().n;
+  const complete    = db.prepare("SELECT COUNT(*) as n FROM contacts WHERE (phone1!='' OR phone2!='') AND email!=''").get().n;
+  res.json({ total, missingPhone, missingEmail, assigned, complete, incomplete: total - complete });
 });
 
 const PORT = process.env.PORT || 3000;
