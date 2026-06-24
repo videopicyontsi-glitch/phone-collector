@@ -511,6 +511,16 @@ function renderStatsCards(stats) {
     const waBtn = u.phone
       ? `<button class="btn btn-sm ${u.pct>=50?'btn-green':'btn-orange'}" onclick="sendWhatsApp('${esc(u.phone)}','${esc(u.displayName)}',${u.pct})" style="flex:none;min-width:80px;">💬 וואטסאפ</button>`
       : '';
+    const contactsPct = u.assignedContacts ? Math.round(u.filledContacts/u.assignedContacts*100) : 0;
+    const contactsSection = u.assignedContacts > 0 ? `
+      <div style="margin-top:10px;padding:10px 12px;background:#f0fdf4;border-radius:10px;border:1px solid #bbf7d0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span style="font-size:13px;font-weight:700;color:#16a34a;">👥 אנשי קשר משוייכים</span>
+          <span style="font-size:12px;color:#16a34a;font-weight:600;">${u.filledContacts}/${u.assignedContacts} הושלמו (${contactsPct}%)</span>
+        </div>
+        <div class="progress-bar-full"><div class="progress-fill" style="width:${contactsPct}%;background:#22c55e;"></div></div>
+      </div>` : '';
+
     return `<div class="user-card">
       <div class="user-card-header">
         <div><div class="user-card-name">${u.displayName}</div><div class="user-card-username">${u.username}</div></div>
@@ -531,9 +541,10 @@ function renderStatsCards(stats) {
         </div>
         <div class="progress-bar-full"><div class="progress-fill" style="width:${u.pct}%"></div></div>
       </div>
+      ${contactsSection}
       <div class="user-card-actions">
         <button class="btn btn-gray btn-sm" onclick="openAddNames('${u.userId}','${esc(u.displayName)}')">✏️ שמות</button>
-        <button class="btn btn-blue btn-sm" onclick="openUserDetail('${u.userId}')">👁 פרטים</button>
+        <button class="btn btn-blue btn-sm" onclick="viewCoordinatorContacts('${u.userId}','${esc(u.displayName)}')">👥 משוייכים</button>
         <button class="btn btn-green btn-sm" onclick="exportUserExcel('${u.userId}','${esc(u.displayName)}')">📥 אקסל</button>
         ${waBtn}
       </div>
@@ -955,6 +966,55 @@ async function saveNames() {
 }
 
 // ===== USER DETAIL =====
+async function viewCoordinatorContacts(userId, displayName) {
+  openModal('modalUserDetail');
+  document.getElementById('userDetailTitle').textContent = `👥 אנשי קשר של ${displayName}`;
+  const el = document.getElementById('userDetailContent');
+  el.innerHTML = loading();
+  try {
+    // admin fetches contacts assigned to this coordinator via contacts endpoint
+    const data = await GET(`/api/contacts?coordinator=${encodeURIComponent(userId)}&limit=500`);
+    const rows = data.rows || [];
+    if (!rows.length) {
+      el.innerHTML = `<div class="empty"><div class="icon">👥</div><p>אין אנשי קשר משוייכים עדיין</p></div>`;
+      return;
+    }
+    const filled = rows.filter(c=>c.phone1||c.phone2).length;
+    el.innerHTML = `
+      <div style="display:flex;gap:16px;margin-bottom:16px;">
+        <div style="flex:1;background:#f0fdf4;border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-size:24px;font-weight:800;color:#16a34a;">${rows.length}</div>
+          <div style="font-size:12px;color:#64748b;">סה״כ משוייכים</div>
+        </div>
+        <div style="flex:1;background:#f0fdf4;border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-size:24px;font-weight:800;color:#16a34a;">${filled}</div>
+          <div style="font-size:12px;color:#64748b;">הושלמו</div>
+        </div>
+        <div style="flex:1;background:#fef2f2;border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-size:24px;font-weight:800;color:#dc2626;">${rows.length-filled}</div>
+          <div style="font-size:12px;color:#64748b;">חסרים</div>
+        </div>
+      </div>
+      <div style="max-height:420px;overflow-y:auto;border-radius:10px;border:1px solid #e2e8f0;">
+        ${rows.map((c,i) => {
+          const hasPhone = c.phone1||c.phone2;
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #f1f5f9;${i===rows.length-1?'border-bottom:none':''}">
+            <div>
+              <div style="font-weight:600;font-size:14px;">${esc(c.lastName)} ${esc(c.firstName)}</div>
+              <div style="font-size:12px;color:#94a3b8;">${esc(c.address||'')}</div>
+            </div>
+            <div style="text-align:left;font-size:13px;">
+              ${hasPhone ? `<div style="color:#16a34a;">📞 ${esc(c.phone1||c.phone2)}</div>` : '<span class="badge badge-red" style="font-size:11px;">חסר טלפון</span>'}
+              ${c.email ? `<div style="color:#64748b;font-size:12px;">✉️ ${esc(c.email)}</div>` : ''}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+  } catch(e) {
+    el.innerHTML = `<div class="empty"><div class="icon">⚠️</div><p>${e.message}</p></div>`;
+  }
+}
+
 async function openUserDetail(userId) {
   openModal('modalUserDetail');
   document.getElementById('userDetailTitle').textContent = '📋 טוען...';

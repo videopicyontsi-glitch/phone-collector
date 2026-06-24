@@ -268,12 +268,19 @@ app.get('/api/stats', admin, (req, res) => {
     const todayC      = all.filter(n => n.phone && new Date(n.phone_added_at).toDateString() === today).length;
     const supporters  = all.filter(n => n.support_status === 'supporter').length;
     const notSupport  = all.filter(n => n.support_status === 'not_supporter').length;
+
+    // contacts assigned to this coordinator
+    const contacts = db.prepare("SELECT phone1,phone2,email FROM contacts WHERE coordinator_id=?").all(u.id);
+    const contactsFilled = contacts.filter(c => c.phone1 || c.phone2).length;
+
     return {
       userId: u.id, displayName: u.display_name, username: u.username, phone: u.phone,
       total: all.length, collected, today: todayC,
       remaining: all.length - collected,
       pct: all.length ? Math.round(collected / all.length * 100) : 0,
-      supporters, notSupport
+      supporters, notSupport,
+      assignedContacts: contacts.length,
+      filledContacts: contactsFilled
     };
   });
   res.json(stats);
