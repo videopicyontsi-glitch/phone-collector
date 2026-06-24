@@ -1078,7 +1078,7 @@ function contactToItem(c) {
   const phone = c.phone1 || c.phone2 || '';
   return { _type:'contact', id:c.id, name:`${c.lastName} ${c.firstName}`.trim(),
     phone, phone1:c.phone1||'', phone2:c.phone2||'', email:c.email||'',
-    address:c.address||'', phoneAddedAt:c.updatedAt||c.createdAt||'', supportStatus:'' };
+    address:c.address||'', phoneAddedAt:c.updatedAt||c.createdAt||'', supportStatus:c.supportStatus||'' };
 }
 
 async function renderUserProfile(userId) {
@@ -1164,7 +1164,8 @@ function renderProfileView(userId) {
                   </div>
                 </div>`;
               } else {
-                // contact item
+                // contact item — pending
+                const ss = n.supportStatus;
                 return `<div class="name-row" id="ci_${n.id}">
                   <div class="name-row-top">
                     <span class="name-row-label">${n.name}</span>
@@ -1174,11 +1175,13 @@ function renderProfileView(userId) {
                     <input type="tel" class="phone-input" id="cp1_${n.id}" value="${esc(n.phone1)}" placeholder="טלפון ראשי"
                       onkeydown="if(event.key==='Enter')saveContactFromProfile('${userId}','${n.id}')">
                     <input type="tel" class="phone-input" id="cp2_${n.id}" value="${esc(n.phone2)}" placeholder="טלפון נוסף" style="margin-top:4px;">
+                    <input type="email" class="phone-input" id="cem_${n.id}" value="${esc(n.email)}" placeholder="מייל" style="margin-top:4px;">
                     <button class="save-btn" onclick="saveContactFromProfile('${userId}','${n.id}')">שמור</button>
                   </div>
-                  ${n.email!==undefined?`<div style="margin-top:6px;">
-                    <input type="email" class="phone-input" id="cem_${n.id}" value="${esc(n.email)}" placeholder="מייל" style="width:100%;">
-                  </div>`:''}
+                  <div class="support-btns">
+                    <button class="support-btn ${ss==='supporter'?'active-green':''}" onclick="setContactSupport('${userId}','${n.id}','supporter')">✅ תומך</button>
+                    <button class="support-btn ${ss==='not_supporter'?'active-red':''}" onclick="setContactSupport('${userId}','${n.id}','not_supporter')">❌ לא תומך</button>
+                  </div>
                 </div>`;
               }
             } else {
@@ -1207,15 +1210,30 @@ function renderProfileView(userId) {
                   </div>
                 </div>`;
               } else {
-                return `<div class="archive-row">
+                // contact item — archive
+                const ss = n.supportStatus;
+                const supportBadge = ss==='supporter'?'<span class="badge badge-green">✅ תומך</span>'
+                  :ss==='not_supporter'?'<span class="badge badge-red">❌ לא תומך</span>'
+                  :'<span class="badge badge-gray">לא סומן</span>';
+                return `<div class="archive-row" id="ci_${n.id}">
                   <div class="archive-row-header">
                     <span class="archive-name">${n.name}</span>
                     <span class="archive-phone">${n.phone}</span>
                   </div>
-                  ${n.address?`<div style="font-size:12px;color:#94a3b8;margin:2px 0;">${esc(n.address)}</div>`:''}
-                  <div class="archive-row-footer">
+                  <div class="archive-row-footer" style="margin-bottom:8px;">
                     <span class="archive-date">${d}</span>
-                    <span class="badge badge-gray" style="font-size:11px;">איש קשר</span>
+                    ${supportBadge}
+                  </div>
+                  <div class="support-btns" style="margin-bottom:8px;">
+                    <button class="support-btn ${ss==='supporter'?'active-green':''}" onclick="setContactSupport('${userId}','${n.id}','supporter')">✅ תומך</button>
+                    <button class="support-btn ${ss==='not_supporter'?'active-red':''}" onclick="setContactSupport('${userId}','${n.id}','not_supporter')">❌ לא תומך</button>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:4px;">
+                    <input type="tel" class="phone-input" id="cp1_${n.id}" value="${esc(n.phone1)}" placeholder="טלפון ראשי">
+                    <input type="tel" class="phone-input" id="cp2_${n.id}" value="${esc(n.phone2)}" placeholder="טלפון נוסף">
+                    <input type="email" class="phone-input" id="cem_${n.id}" value="${esc(n.email)}" placeholder="מייל">
+                    <input type="text" class="phone-input" id="cadr_${n.id}" value="${esc(n.address)}" placeholder="כתובת מגורים">
+                    <button class="save-btn" style="align-self:flex-end;" onclick="saveContactFromProfile('${userId}','${n.id}')">שמור</button>
                   </div>
                 </div>`;
               }
@@ -1228,14 +1246,34 @@ function renderProfileView(userId) {
 function switchProfileTab(tab,userId) { profileTab=tab; phoneFilter=''; renderProfileView(userId); }
 
 async function saveContactFromProfile(userId, id) {
-  const phone1 = document.getElementById('cp1_'+id)?.value.trim()||'';
-  const phone2 = document.getElementById('cp2_'+id)?.value.trim()||'';
-  const email  = document.getElementById('cem_'+id)?.value.trim()||'';
+  const phone1   = document.getElementById('cp1_'+id)?.value.trim()||'';
+  const phone2   = document.getElementById('cp2_'+id)?.value.trim()||'';
+  const email    = document.getElementById('cem_'+id)?.value.trim()||'';
+  const address  = document.getElementById('cadr_'+id)?.value.trim()||undefined;
   try {
-    await PUT('/api/my-contacts/'+id, { phone1, phone2, email });
-    // update in-memory and re-render
+    await PUT('/api/my-contacts/'+id, { phone1, phone2, email, ...(address!==undefined&&{address}) });
     const ci = profileContacts.findIndex(c=>c.id===id);
-    if (ci>=0) { profileContacts[ci].phone1=phone1; profileContacts[ci].phone2=phone2; profileContacts[ci].email=email; profileContacts[ci].updatedAt=new Date().toISOString(); }
+    if (ci>=0) {
+      profileContacts[ci].phone1=phone1; profileContacts[ci].phone2=phone2;
+      profileContacts[ci].email=email; profileContacts[ci].updatedAt=new Date().toISOString();
+      if (address!==undefined) profileContacts[ci].address=address;
+    }
+    const btn = document.querySelector(`#ci_${id} .save-btn`);
+    if (btn) { btn.textContent='✓ נשמר'; btn.style.background='#22c55e'; setTimeout(()=>{ btn.textContent='שמור'; btn.style.background=''; },1500); }
+    // re-render only if phone status changed (moves between tabs)
+    const hadPhone = !!(profileContacts[ci]?.phone);
+    const hasPhone = !!(phone1||phone2);
+    if (hadPhone !== hasPhone) renderProfileView(userId);
+  } catch(e) { alert('שגיאה: '+e.message); }
+}
+
+async function setContactSupport(userId, id, status) {
+  const ci = profileContacts.findIndex(c=>c.id===id);
+  const current = ci>=0 ? profileContacts[ci].supportStatus||'' : '';
+  const newStatus = current === status ? '' : status;
+  try {
+    await PUT('/api/my-contacts/'+id, { supportStatus: newStatus });
+    if (ci>=0) profileContacts[ci].supportStatus = newStatus;
     renderProfileView(userId);
   } catch(e) { alert('שגיאה: '+e.message); }
 }

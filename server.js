@@ -48,6 +48,7 @@ db.exec(`
 `);
 try { db.exec("ALTER TABLE contacts ADD COLUMN coordinator_id TEXT DEFAULT ''"); } catch {}
 try { db.exec("ALTER TABLE contacts ADD COLUMN notes TEXT DEFAULT ''"); } catch {}
+try { db.exec("ALTER TABLE contacts ADD COLUMN support_status TEXT DEFAULT ''"); } catch {}
 
 const adminExists = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
 if (!adminExists) {
@@ -246,7 +247,7 @@ app.get('/api/my-contacts', auth, (req, res) => {
   res.json(rows.map(r => ({
     id: r.id, lastName: r.last_name, firstName: r.first_name,
     address: r.address, phone1: r.phone1, phone2: r.phone2,
-    email: r.email, branchStatus: r.branch_status
+    email: r.email, branchStatus: r.branch_status, supportStatus: r.support_status||''
   })));
 });
 
@@ -256,11 +257,13 @@ app.put('/api/my-contacts/:id', auth, (req, res) => {
   if (!c) return res.status(404).json({ error: 'לא נמצא' });
   if (req.session.role !== 'admin' && c.coordinator_id !== req.session.userId)
     return res.status(403).json({ error: 'Forbidden' });
-  const { phone1, phone2, email } = req.body;
+  const { phone1, phone2, email, address, supportStatus } = req.body;
   const now = new Date().toISOString();
-  if (phone1 !== undefined) db.prepare('UPDATE contacts SET phone1=?,updated_at=? WHERE id=?').run(phone1,now,req.params.id);
-  if (phone2 !== undefined) db.prepare('UPDATE contacts SET phone2=?,updated_at=? WHERE id=?').run(phone2,now,req.params.id);
-  if (email  !== undefined) db.prepare('UPDATE contacts SET email=?,updated_at=? WHERE id=?').run(email,now,req.params.id);
+  if (phone1         !== undefined) db.prepare('UPDATE contacts SET phone1=?,updated_at=? WHERE id=?').run(phone1,now,req.params.id);
+  if (phone2         !== undefined) db.prepare('UPDATE contacts SET phone2=?,updated_at=? WHERE id=?').run(phone2,now,req.params.id);
+  if (email          !== undefined) db.prepare('UPDATE contacts SET email=?,updated_at=? WHERE id=?').run(email,now,req.params.id);
+  if (address        !== undefined) db.prepare('UPDATE contacts SET address=?,updated_at=? WHERE id=?').run(address,now,req.params.id);
+  if (supportStatus  !== undefined) db.prepare('UPDATE contacts SET support_status=?,updated_at=? WHERE id=?').run(supportStatus,now,req.params.id);
   res.json({ ok: true });
 });
 
