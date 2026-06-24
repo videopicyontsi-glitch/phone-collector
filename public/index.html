@@ -53,6 +53,7 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; color: #
 .btn-blue { background: #3b82f6; color: white; }
 .btn-green { background: #22c55e; color: white; }
 .btn-red { background: #ef4444; color: white; }
+.btn-purple { background: #7c3aed; color: white; }
 .btn-gray { background: #e5e7eb; color: #374151; }
 .btn-orange { background: #f59e0b; color: white; }
 .btn-sm { padding: 7px 12px; font-size: 13px; min-height: 36px; border-radius: 8px; }
@@ -354,7 +355,7 @@ tr:last-child td { border-bottom: none; }
 <div class="modal-overlay" id="modalImportContacts" style="display:none;">
   <div class="modal" style="max-width:500px;">
     <h3>📂 ייבוא רשימת תושבים מאקסל</h3>
-    <p style="font-size:14px;color:#64748b;margin:10px 0 18px;">
+    <p id="importContactsSubtitle" style="font-size:14px;color:#64748b;margin:10px 0 18px;">
       הקובץ צריך לכלול עמודות: <strong>שם משפחה, שם פרטי, כתובת, טלפון ראשי, טלפון נוסף, דוא"ל</strong><br>
       רשומות קיימות (לפי קוד תושב) לא יוחלפו.
     </p>
@@ -481,6 +482,7 @@ async function renderAdmin() {
           <div class="btn-group">
             <button class="btn btn-green btn-sm" onclick="exportAllExcel()">📥 ייצא הכל</button>
             <button class="btn btn-gray btn-sm" onclick="openExportOptions()">📊 ייצוא לפי משתמש</button>
+            <button class="btn btn-red btn-sm" onclick="clearAllData()">🗑 נקה נתונים</button>
           </div>
         </div>
         <div class="search-bar" style="background:white;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.07);margin-bottom:16px;">
@@ -545,7 +547,8 @@ function renderStatsCards(stats) {
       <div class="user-card-actions">
         <button class="btn btn-gray btn-sm" onclick="openAddNames('${u.userId}','${esc(u.displayName)}')">✏️ שמות</button>
         <button class="btn btn-blue btn-sm" onclick="viewCoordinatorContacts('${u.userId}','${esc(u.displayName)}')">👥 משוייכים</button>
-        <button class="btn btn-green btn-sm" onclick="exportUserExcel('${u.userId}','${esc(u.displayName)}')">📥 אקסל</button>
+        <button class="btn btn-purple btn-sm" onclick="openImportContactsModal('${u.userId}','${esc(u.displayName)}')">📂 ייבא אקסל</button>
+        <button class="btn btn-green btn-sm" onclick="exportUserExcel('${u.userId}','${esc(u.displayName)}')">📥 הורד אקסל</button>
         ${waBtn}
       </div>
     </div>`;
@@ -784,9 +787,22 @@ async function saveContactMobile(id) {
   } catch(e) { alert('שגיאה: '+e.message); }
 }
 
-function openImportContactsModal() {
+let importTargetCoordinatorId = '';
+let importTargetCoordinatorName = '';
+
+function openImportContactsModal(coordinatorId='', coordinatorName='') {
+  importTargetCoordinatorId = coordinatorId;
+  importTargetCoordinatorName = coordinatorName;
   document.getElementById('modalImportContacts').style.display='flex';
   document.getElementById('importContactsResult').textContent='';
+  document.getElementById('importContactsFileName').textContent = 'לחץ לבחירת קובץ אקסל';
+  document.getElementById('importContactsFile').value = '';
+  const subtitle = document.getElementById('importContactsSubtitle');
+  if (coordinatorName) {
+    subtitle.innerHTML = `ייבוא לרכז: <strong style="color:#2563eb;">${esc(coordinatorName)}</strong><br><span style="font-size:13px;color:#94a3b8;">הקובץ צריך לכלול: שם משפחה, שם פרטי, כתובת, טלפון ראשי, טלפון נוסף, דוא"ל</span>`;
+  } else {
+    subtitle.innerHTML = `הקובץ צריך לכלול עמודות: <strong>שם משפחה, שם פרטי, כתובת, טלפון ראשי, טלפון נוסף, דוא"ל</strong><br>רשומות קיימות (לפי קוד תושב) לא יוחלפו.`;
+  }
 }
 
 async function doImportContacts() {
@@ -832,7 +848,7 @@ async function doImportContacts() {
 
     if (!rows.length) { alert('לא נמצאו שורות בקובץ'); btn.disabled=false; btn.textContent='ייבא'; return; }
 
-    const result = await POST('/api/contacts/import', { rows });
+    const result = await POST('/api/contacts/import', { rows, coordinatorId: importTargetCoordinatorId || '' });
     document.getElementById('importContactsResult').innerHTML =
       `<div style="color:#16a34a;font-weight:600;margin-top:12px;">✅ יובאו ${result.added} רשומות חדשות | ${result.skipped} כבר קיימות</div>`;
     fileInput.value='';
@@ -892,6 +908,15 @@ async function saveNewUser() {
     renderAdmin();
   } catch(e) { alert(e.message); }
 }
+async function clearAllData() {
+  if (!confirm('למחוק את כל השמות ואנשי הקשר?\nהרכזים ישמרו — רק הנתונים יימחקו.')) return;
+  try {
+    await DEL('/api/data/all');
+    alert('הנתונים נוקו בהצלחה');
+    renderAdmin();
+  } catch(e) { alert('שגיאה: '+e.message); }
+}
+
 async function deleteUser(uid) {
   if (!confirm('למחוק משתמש זה ואת כל הנתונים שלו?')) return;
   try { await DEL(`/api/users/${uid}`); renderAdmin(); } catch(e) { alert(e.message); }

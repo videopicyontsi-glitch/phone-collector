@@ -185,6 +185,12 @@ app.delete('/api/users/:id', admin, (req, res) => {
   res.json({ ok: true });
 });
 
+app.delete('/api/data/all', admin, (req, res) => {
+  db.prepare('DELETE FROM names').run();
+  db.prepare('DELETE FROM contacts').run();
+  res.json({ ok: true });
+});
+
 // ── NAMES ──
 app.get('/api/names', auth, (req, res) => {
   const userId = req.query.userId || req.session.userId;
@@ -313,8 +319,9 @@ app.get('/api/export/user/:id', admin, (req, res) => {
 
 // Import from Excel (JSON payload sent from client-side SheetJS parsing)
 app.post('/api/contacts/import', admin, (req, res) => {
-  const { rows } = req.body; // [{resident_code, last_name, first_name, address, phone1, phone2, email, branch_status}]
+  const { rows, coordinatorId } = req.body;
   if (!Array.isArray(rows)) return res.status(400).json({ error: 'שגיאה בנתונים' });
+  const coordId = coordinatorId || '';
 
   const insert = db.prepare(`
     INSERT OR IGNORE INTO contacts (id,resident_code,last_name,first_name,address,phone1,phone2,email,branch_status,coordinator_id,created_at,updated_at)
@@ -330,7 +337,7 @@ app.post('/api/contacts/import', admin, (req, res) => {
         r.resident_code || null,
         r.last_name || '', r.first_name || '',
         r.address || '', r.phone1 || '', r.phone2 || '',
-        r.email || '', r.branch_status || '', '', now, now
+        r.email || '', r.branch_status || '', coordId, now, now
       );
       if (result.changes > 0) added++; else skipped++;
     });
