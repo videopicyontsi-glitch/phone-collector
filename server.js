@@ -263,21 +263,29 @@ app.get('/api/stats', admin, (req, res) => {
   const users = db.prepare("SELECT id,username,display_name,phone FROM users WHERE role!='admin'").all();
   const today = new Date().toDateString();
   const stats = users.map(u => {
-    const all = db.prepare('SELECT phone,phone_added_at,support_status FROM names WHERE user_id=?').all(u.id);
-    const collected   = all.filter(n => n.phone).length;
-    const todayC      = all.filter(n => n.phone && new Date(n.phone_added_at).toDateString() === today).length;
-    const supporters  = all.filter(n => n.support_status === 'supporter').length;
-    const notSupport  = all.filter(n => n.support_status === 'not_supporter').length;
+    const names    = db.prepare('SELECT phone,phone_added_at,support_status FROM names WHERE user_id=?').all(u.id);
+    const contacts = db.prepare("SELECT phone1,phone2,updated_at FROM contacts WHERE coordinator_id=?").all(u.id);
 
-    // contacts assigned to this coordinator
-    const contacts = db.prepare("SELECT phone1,phone2,email FROM contacts WHERE coordinator_id=?").all(u.id);
-    const contactsFilled = contacts.filter(c => c.phone1 || c.phone2).length;
+    // names stats
+    const namesCollected  = names.filter(n => n.phone).length;
+    const namesToday      = names.filter(n => n.phone && new Date(n.phone_added_at).toDateString() === today).length;
+    const supporters      = names.filter(n => n.support_status === 'supporter').length;
+    const notSupport      = names.filter(n => n.support_status === 'not_supporter').length;
+
+    // contacts stats
+    const contactsFilled  = contacts.filter(c => c.phone1 || c.phone2).length;
+    const contactsToday   = contacts.filter(c => (c.phone1||c.phone2) && new Date(c.updated_at).toDateString() === today).length;
+
+    // combined
+    const total     = names.length + contacts.length;
+    const collected = namesCollected + contactsFilled;
+    const todayC    = namesToday + contactsToday;
 
     return {
       userId: u.id, displayName: u.display_name, username: u.username, phone: u.phone,
-      total: all.length, collected, today: todayC,
-      remaining: all.length - collected,
-      pct: all.length ? Math.round(collected / all.length * 100) : 0,
+      total, collected, today: todayC,
+      remaining: total - collected,
+      pct: total ? Math.round(collected / total * 100) : 0,
       supporters, notSupport,
       assignedContacts: contacts.length,
       filledContacts: contactsFilled
