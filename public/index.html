@@ -1046,26 +1046,43 @@ async function openUserDetail(userId) {
 }
 
 // ===== USER PROFILE =====
-let profileTab='pending', phoneFilter='', profileNames=[];
+let profileTab='pending', phoneFilter='', profileNames=[], profileContacts=[];
+
+// Normalize a contact into a unified item
+function contactToItem(c) {
+  const phone = c.phone1 || c.phone2 || '';
+  return { _type:'contact', id:c.id, name:`${c.lastName} ${c.firstName}`.trim(),
+    phone, phone1:c.phone1||'', phone2:c.phone2||'', email:c.email||'',
+    address:c.address||'', phoneAddedAt:c.updatedAt||c.createdAt||'', supportStatus:'' };
+}
 
 async function renderUserProfile(userId) {
   document.getElementById('mainContent').innerHTML = loading();
   try {
-    profileNames = await GET(`/api/names?userId=${userId}`);
+    [profileNames, profileContacts] = await Promise.all([
+      GET(`/api/names?userId=${userId}`),
+      GET('/api/my-contacts').catch(()=>[])
+    ]);
     renderProfileView(userId);
-    if (profileTab==='assigned') loadAssignedContacts();
   } catch(e) {
     document.getElementById('mainContent').innerHTML=`<div class="empty"><div class="icon">⚠️</div><p>${e.message}</p></div>`;
   }
 }
 
 function renderProfileView(userId) {
-  const user     = currentUser;
-  const today    = new Date().toDateString();
-  const pending  = profileNames.filter(n=>!n.phone);
-  const archived = profileNames.filter(n=> n.phone);
-  const todayC   = archived.filter(n=>new Date(n.phoneAddedAt).toDateString()===today).length;
-  const pct      = profileNames.length ? Math.round(archived.length/profileNames.length*100) : 0;
+  const user    = currentUser;
+  const today   = new Date().toDateString();
+
+  // merge names + contacts into unified list
+  const allItems = [
+    ...profileNames.map(n=>({...n, _type:'name'})),
+    ...profileContacts.map(contactToItem)
+  ];
+
+  const pending  = allItems.filter(n => !n.phone);
+  const archived = allItems.filter(n =>  n.phone);
+  const todayC   = archived.filter(n => new Date(n.phoneAddedAt).toDateString()===today).length;
+  const pct      = allItems.length ? Math.round(archived.length/allItems.length*100) : 0;
   const list     = profileTab==='pending' ? pending : archived;
   const filtered = list.filter(n=>!phoneFilter||n.name.includes(phoneFilter));
 
@@ -1091,143 +1108,113 @@ function renderProfileView(userId) {
       <button class="tab ${profileTab==='archive'?'active':''}" onclick="switchProfileTab('archive','${userId}')">
         ✅ ארכיון (${archived.length})
       </button>
-      <button class="tab ${profileTab==='assigned'?'active':''}" onclick="switchProfileTab('assigned','${userId}')">
-        👥 משוייכים אליי
-      </button>
     </div>
 
-    ${profileTab==='assigned' ? `<div id="assignedContactsSection"></div>` : ''}
-
-    <div class="names-table-wrap" ${profileTab==='assigned'?'style="display:none"':''}>
+    <div class="names-table-wrap">
       <div class="search-bar">
         <input type="text" placeholder="🔍 חיפוש שם..." value="${phoneFilter}" oninput="phoneFilter=this.value;renderProfileView('${userId}')">
-        <span class="search-bar-count">${filtered.length} שמות</span>
+        <span class="search-bar-count">${filtered.length} פריטים</span>
       </div>
       ${filtered.length===0
         ? `<div class="empty"><div class="icon">${profileTab==='pending'?'🎉':'📦'}</div><p>${
-            profileNames.length===0?'אין שמות ברשימה עדיין':
+            allItems.length===0?'אין שמות ברשימה עדיין':
             profileTab==='pending'?'כל השמות הושלמו! 🎉':'אין עדיין שמות עם טלפון'
           }</p></div>`
-        : profileTab==='pending'
-          ? filtered.map(n => {
-              const orig = profileNames.indexOf(n)+1;
-              const ss = n.supportStatus;
-              return `<div class="name-row">
-                <div class="name-row-top">
-                  <span class="name-row-label">${n.name}</span>
-                  <span class="name-row-num">#${orig}</span>
-                </div>
-                <div class="name-row-input-wrap">
-                  <input type="tel" class="phone-input" id="ph_${n.id}" placeholder="05X-XXXXXXX"
-                    onkeydown="if(event.key==='Enter')savePhone('${userId}','${n.id}')">
-                  <button class="save-btn" onclick="savePhone('${userId}','${n.id}')">שמור</button>
-                </div>
-                <div class="support-btns">
-                  <button class="support-btn ${ss==='supporter'?'active-green':''}" onclick="setSupport('${userId}','${n.id}','supporter')">✅ תומך</button>
-                  <button class="support-btn ${ss==='not_supporter'?'active-red':''}" onclick="setSupport('${userId}','${n.id}','not_supporter')">❌ לא תומך</button>
-                </div>
-              </div>`;
-            }).join('')
-          : filtered.map(n => {
-              const orig = profileNames.indexOf(n)+1;
-              const d = n.phoneAddedAt ? new Date(n.phoneAddedAt).toLocaleDateString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
-              const ss = n.supportStatus;
-              const supportBadge = ss==='supporter'
-                ? '<span class="badge badge-green">✅ תומך</span>'
-                : ss==='not_supporter'
-                ? '<span class="badge badge-red">❌ לא תומך</span>'
-                : '<span class="badge badge-gray">לא סומן</span>';
-              return `<div class="archive-row">
-                <div class="archive-row-header">
-                  <span class="archive-name">${n.name}</span>
-                  <span class="archive-phone">${n.phone}</span>
-                </div>
-                <div class="archive-row-footer">
-                  <span class="archive-date">${d}</span>
-                  <div style="display:flex;gap:6px;align-items:center;">
-                    ${supportBadge}
-                    <button class="btn btn-sm btn-gray" onclick="clearPhone('${userId}','${n.id}')">↩</button>
+        : filtered.map((n,idx) => {
+            if (profileTab==='pending') {
+              if (n._type==='name') {
+                const ss = n.supportStatus;
+                return `<div class="name-row">
+                  <div class="name-row-top">
+                    <span class="name-row-label">${n.name}</span>
                   </div>
-                </div>
-                <div class="support-btns" style="margin-top:8px;">
-                  <button class="support-btn ${ss==='supporter'?'active-green':''}" onclick="setSupport('${userId}','${n.id}','supporter')">✅ תומך</button>
-                  <button class="support-btn ${ss==='not_supporter'?'active-red':''}" onclick="setSupport('${userId}','${n.id}','not_supporter')">❌ לא תומך</button>
-                </div>
-              </div>`;
-            }).join('')
+                  <div class="name-row-input-wrap">
+                    <input type="tel" class="phone-input" id="ph_${n.id}" placeholder="05X-XXXXXXX"
+                      onkeydown="if(event.key==='Enter')savePhone('${userId}','${n.id}')">
+                    <button class="save-btn" onclick="savePhone('${userId}','${n.id}')">שמור</button>
+                  </div>
+                  <div class="support-btns">
+                    <button class="support-btn ${ss==='supporter'?'active-green':''}" onclick="setSupport('${userId}','${n.id}','supporter')">✅ תומך</button>
+                    <button class="support-btn ${ss==='not_supporter'?'active-red':''}" onclick="setSupport('${userId}','${n.id}','not_supporter')">❌ לא תומך</button>
+                  </div>
+                </div>`;
+              } else {
+                // contact item
+                return `<div class="name-row" id="ci_${n.id}">
+                  <div class="name-row-top">
+                    <span class="name-row-label">${n.name}</span>
+                    ${n.address?`<span style="font-size:11px;color:#94a3b8;">${esc(n.address)}</span>`:''}
+                  </div>
+                  <div class="name-row-input-wrap">
+                    <input type="tel" class="phone-input" id="cp1_${n.id}" value="${esc(n.phone1)}" placeholder="טלפון ראשי"
+                      onkeydown="if(event.key==='Enter')saveContactFromProfile('${userId}','${n.id}')">
+                    <input type="tel" class="phone-input" id="cp2_${n.id}" value="${esc(n.phone2)}" placeholder="טלפון נוסף" style="margin-top:4px;">
+                    <button class="save-btn" onclick="saveContactFromProfile('${userId}','${n.id}')">שמור</button>
+                  </div>
+                  ${n.email!==undefined?`<div style="margin-top:6px;">
+                    <input type="email" class="phone-input" id="cem_${n.id}" value="${esc(n.email)}" placeholder="מייל" style="width:100%;">
+                  </div>`:''}
+                </div>`;
+              }
+            } else {
+              // archive
+              const d = n.phoneAddedAt ? new Date(n.phoneAddedAt).toLocaleDateString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+              if (n._type==='name') {
+                const ss = n.supportStatus;
+                const supportBadge = ss==='supporter'?'<span class="badge badge-green">✅ תומך</span>'
+                  :ss==='not_supporter'?'<span class="badge badge-red">❌ לא תומך</span>'
+                  :'<span class="badge badge-gray">לא סומן</span>';
+                return `<div class="archive-row">
+                  <div class="archive-row-header">
+                    <span class="archive-name">${n.name}</span>
+                    <span class="archive-phone">${n.phone}</span>
+                  </div>
+                  <div class="archive-row-footer">
+                    <span class="archive-date">${d}</span>
+                    <div style="display:flex;gap:6px;align-items:center;">
+                      ${supportBadge}
+                      <button class="btn btn-sm btn-gray" onclick="clearPhone('${userId}','${n.id}')">↩</button>
+                    </div>
+                  </div>
+                  <div class="support-btns" style="margin-top:8px;">
+                    <button class="support-btn ${ss==='supporter'?'active-green':''}" onclick="setSupport('${userId}','${n.id}','supporter')">✅ תומך</button>
+                    <button class="support-btn ${ss==='not_supporter'?'active-red':''}" onclick="setSupport('${userId}','${n.id}','not_supporter')">❌ לא תומך</button>
+                  </div>
+                </div>`;
+              } else {
+                return `<div class="archive-row">
+                  <div class="archive-row-header">
+                    <span class="archive-name">${n.name}</span>
+                    <span class="archive-phone">${n.phone}</span>
+                  </div>
+                  ${n.address?`<div style="font-size:12px;color:#94a3b8;margin:2px 0;">${esc(n.address)}</div>`:''}
+                  <div class="archive-row-footer">
+                    <span class="archive-date">${d}</span>
+                    <span class="badge badge-gray" style="font-size:11px;">איש קשר</span>
+                  </div>
+                </div>`;
+              }
+            }
+          }).join('')
       }
     </div>`;
 }
 
-function switchProfileTab(tab,userId) {
-  profileTab=tab; phoneFilter=''; renderProfileView(userId);
-  if (tab==='assigned') loadAssignedContacts();
-}
+function switchProfileTab(tab,userId) { profileTab=tab; phoneFilter=''; renderProfileView(userId); }
 
-async function loadAssignedContacts(q='') {
-  const el = document.getElementById('assignedContactsSection');
-  if (!el) return;
-  el.innerHTML = `<div style="padding:24px;text-align:center;">${loading()}</div>`;
-  try {
-    const params = q ? `?q=${encodeURIComponent(q)}` : '';
-    const contacts = await GET('/api/my-contacts'+params);
-    if (!contacts.length) {
-      el.innerHTML = `<div class="empty"><div class="icon">👥</div><p>אין אנשי קשר משוייכים אליך עדיין</p></div>`;
-      return;
-    }
-    el.innerHTML = `
-      <div class="names-table-wrap">
-        <div class="search-bar">
-          <input type="text" placeholder="🔍 חיפוש שם, כתובת..." value="${q}"
-            oninput="loadAssignedContacts(this.value)">
-          <span class="search-bar-count">${contacts.length} אנשי קשר</span>
-        </div>
-        ${contacts.map(c => {
-          const hasPhone = c.phone1 || c.phone2;
-          const hasEmail = c.email;
-          return `<div class="name-row" id="ac_${c.id}">
-            <div class="name-row-top">
-              <span class="name-row-label" style="font-size:16px;">${esc(c.lastName)} ${esc(c.firstName)}</span>
-              ${hasPhone ? '<span class="badge badge-green" style="font-size:11px;">✓ טלפון</span>' : '<span class="badge badge-red" style="font-size:11px;">חסר טלפון</span>'}
-            </div>
-            ${c.address ? `<div style="font-size:12px;color:#94a3b8;margin:2px 0 8px;">${esc(c.address)}</div>` : ''}
-            <div style="display:flex;flex-direction:column;gap:8px;">
-              <div style="display:flex;gap:8px;align-items:center;">
-                <input type="tel" class="phone-input" id="ac_p1_${c.id}" value="${esc(c.phone1)}" placeholder="טלפון ראשי" style="flex:1;">
-                <input type="tel" class="phone-input" id="ac_p2_${c.id}" value="${esc(c.phone2)}" placeholder="טלפון נוסף" style="flex:1;">
-              </div>
-              <div style="display:flex;gap:8px;align-items:center;">
-                <input type="email" class="phone-input" id="ac_em_${c.id}" value="${esc(c.email)}" placeholder="כתובת מייל" style="flex:1;">
-                <button class="save-btn" onclick="saveAssignedContact('${c.id}')">שמור</button>
-              </div>
-            </div>
-          </div>`;
-        }).join('')}
-      </div>`;
-  } catch(e) {
-    el.innerHTML = `<div class="empty"><div class="icon">⚠️</div><p>שגיאה: ${e.message}</p></div>`;
-  }
-}
-
-async function saveAssignedContact(id) {
-  const phone1 = document.getElementById('ac_p1_'+id)?.value.trim() || '';
-  const phone2 = document.getElementById('ac_p2_'+id)?.value.trim() || '';
-  const email  = document.getElementById('ac_em_'+id)?.value.trim() || '';
+async function saveContactFromProfile(userId, id) {
+  const phone1 = document.getElementById('cp1_'+id)?.value.trim()||'';
+  const phone2 = document.getElementById('cp2_'+id)?.value.trim()||'';
+  const email  = document.getElementById('cem_'+id)?.value.trim()||'';
   try {
     await PUT('/api/my-contacts/'+id, { phone1, phone2, email });
-    const row = document.getElementById('ac_'+id);
-    if (row) {
-      const badge = row.querySelector('.badge');
-      if (badge) {
-        const hasPhone = phone1 || phone2;
-        badge.className = 'badge ' + (hasPhone ? 'badge-green' : 'badge-red');
-        badge.textContent = hasPhone ? '✓ טלפון' : 'חסר טלפון';
-      }
-      const btn = row.querySelector('.save-btn');
-      if (btn) { btn.textContent='✓ נשמר'; btn.style.background='#22c55e'; setTimeout(()=>{btn.textContent='שמור';btn.style.background='';},1500); }
-    }
+    // update in-memory and re-render
+    const ci = profileContacts.findIndex(c=>c.id===id);
+    if (ci>=0) { profileContacts[ci].phone1=phone1; profileContacts[ci].phone2=phone2; profileContacts[ci].email=email; profileContacts[ci].updatedAt=new Date().toISOString(); }
+    renderProfileView(userId);
   } catch(e) { alert('שגיאה: '+e.message); }
 }
+
 
 async function savePhone(userId, nameId) {
   const input = document.getElementById('ph_'+nameId);
