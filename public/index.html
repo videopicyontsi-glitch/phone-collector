@@ -1249,21 +1249,13 @@ async function saveContactFromProfile(userId, id) {
   const phone1   = document.getElementById('cp1_'+id)?.value.trim()||'';
   const phone2   = document.getElementById('cp2_'+id)?.value.trim()||'';
   const email    = document.getElementById('cem_'+id)?.value.trim()||'';
-  const address  = document.getElementById('cadr_'+id)?.value.trim()||undefined;
+  const addrEl   = document.getElementById('cadr_'+id);
+  const address  = addrEl ? addrEl.value.trim() : undefined;
   try {
     await PUT('/api/my-contacts/'+id, { phone1, phone2, email, ...(address!==undefined&&{address}) });
-    const ci = profileContacts.findIndex(c=>c.id===id);
-    if (ci>=0) {
-      profileContacts[ci].phone1=phone1; profileContacts[ci].phone2=phone2;
-      profileContacts[ci].email=email; profileContacts[ci].updatedAt=new Date().toISOString();
-      if (address!==undefined) profileContacts[ci].address=address;
-    }
-    const btn = document.querySelector(`#ci_${id} .save-btn`);
-    if (btn) { btn.textContent='✓ נשמר'; btn.style.background='#22c55e'; setTimeout(()=>{ btn.textContent='שמור'; btn.style.background=''; },1500); }
-    // re-render only if phone status changed (moves between tabs)
-    const hadPhone = !!(profileContacts[ci]?.phone);
-    const hasPhone = !!(phone1||phone2);
-    if (hadPhone !== hasPhone) renderProfileView(userId);
+    // reload from server so phone_added_at / updatedAt are accurate for todayC
+    profileContacts = await GET('/api/my-contacts').catch(()=>profileContacts);
+    renderProfileView(userId);
   } catch(e) { alert('שגיאה: '+e.message); }
 }
 
